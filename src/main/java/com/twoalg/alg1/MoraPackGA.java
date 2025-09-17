@@ -19,8 +19,8 @@ public class MoraPackGA {
     static final int PICKUP_WINDOW_MIN = 120;         // 2 horas de recojo
 
     // ===================== Parámetros GA =============================
-    static final int POP_SIZE = 80;
-    static final int MAX_GEN  = 200;
+    static final int POP_SIZE = 40;
+    static final int MAX_GEN  = 100;
     static final double PCROSS = 0.8;
     static final double PMUT   = 0.05;
     static final int ELITE_K   = 4;
