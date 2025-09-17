@@ -1,8 +1,3 @@
-// MoraPackGA.java
-// Java 17+
-// GA con decodificador que respeta: conexión mínima, due dates 2/3 días, escalas, split de pedidos,
-// capacidades de vuelo y almacén. Vuelos diarios (plantillas).
-
 import java.io.*;
 import java.nio.file.*;
 import java.time.*;
@@ -18,7 +13,7 @@ public class MoraPackGA {
     static final int DUE_CROSS_MIN = 3 * 24 * 60; // 3 días
 
     // Si el enunciado requiere 2h de ventana de recojo adicional, se puede sumar al due si aplica.
-    static final int PICKUP_WINDOW_MIN = 0;
+    static final int PICKUP_WINDOW_MIN = 120;
 
     // ===================== Parámetros GA =============================
     static final int POP_SIZE = 80;
@@ -56,7 +51,7 @@ public class MoraPackGA {
 
     enum Continent { SOUTH_AMERICA, EUROPE, ASIA, OTHER }
 
-    // Heurística robusta para este dataset: por prefijo ICAO
+    // Heurística robusta para este dataset: por prefijo ICAO //Se puede reemplazar por un mapeo exacto luego
     static Continent inferContinent(String icao) {
         // América del Sur: ICAO empieza con 'S'
         if (icao != null && icao.length() >= 1 && icao.charAt(0) == 'S') return Continent.SOUTH_AMERICA;
