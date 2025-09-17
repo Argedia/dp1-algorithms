@@ -11,26 +11,26 @@ public class MoraPackACO {
     // =========================
     // PARÁMETROS DE NEGOCIO
     // =========================
-    static final int MIN_CONEXION = 30; // minutos
-    static final Duration PLAZO_INTRA = Duration.ofDays(2);
-    static final Duration PLAZO_INTER = Duration.ofDays(3);
+    static final int MIN_CONEXION = 30; // minutos conexión mínima
+    static final Duration PLAZO_INTRA = Duration.ofDays(2); // plazo intra-continente
+    static final Duration PLAZO_INTER = Duration.ofDays(3); // plazo inter-continente
 
     // =========================
     // PARÁMETROS ACO
     // =========================
-    static int N_HORMIGAS = 20;
-    static int MAX_ITER = 100;
-    static double ALPHA = 1.0;
-    static double BETA = 2.0;
-    static double RHO = 0.1;    // evaporación
-    static double PHI = 0.1;    // actualización local
-    static double TAU0 = 0.01;  // feromona inicial
-    static double Q = 1.0;      // recompensa (refuerzo)
+    static int N_HORMIGAS = 125;
+    static int MAX_ITER = 300;
+    static double ALPHA = 1.5;
+    static double BETA = 4.5;
+    static double RHO = 0.04;    // evaporación
+    static double PHI = 0.10;    // actualización local
+    static double TAU0 = 0.01;   // feromona inicial
+    static double Q = 1.5;       // refuerzo
 
-    // Control de construcción
+    // Restricciones
     static final int MAX_ESCALAS = 8;
-    static final int MAX_VISITAS_AEROPUERTO = 2; // evitar ciclos
-    static final int STAGNATION_PATIENCE = 25;   // iteraciones sin mejora antes de reset tau
+    static final int MAX_VISITAS_AEROPUERTO = 2;
+    static final int STAGNATION_PATIENCE = 80;
 
     // =========================
     // MODELOS
@@ -81,10 +81,9 @@ public class MoraPackACO {
     // =========================
     // FEROMONAS
     // =========================
-    // Usamos clave estable por vuelo: ORI|DES|HH:MM|HH:MM
     static String key(Vuelo v){ return v.origen+"|"+v.destino+"|"+v.horaOrigen+"|"+v.horaDestino; }
     static Map<String, Double> tau = new HashMap<>();
-    static Random RNG = new Random(42);
+    static Random RNG = new Random();
 
     // =========================
     // UTILIDADES
@@ -94,7 +93,7 @@ public class MoraPackACO {
         LocalTime lt = LocalTime.parse(hhmm, fmt);
         LocalDateTime localDT = LocalDateTime.of(ancla, lt);
         int minutos = gmt * 60;
-        return localDT.toEpochSecond(ZoneOffset.ofTotalSeconds(minutos*60))/60L; // minutos desde época
+        return localDT.toEpochSecond(ZoneOffset.ofTotalSeconds(minutos*60))/60L;
     }
 
     static boolean mismoContinente(Aeropuerto a, Aeropuerto b){
@@ -114,11 +113,11 @@ public class MoraPackACO {
         if (a==null||b==null) return 0.0;
         if (Double.isNaN(a.lat) || Double.isNaN(a.lon) || Double.isNaN(b.lat) || Double.isNaN(b.lon)) return 0.0;
         double d=haversine(a.lat,a.lon,b.lat,b.lon);
-        return Math.max(0.0, Math.min(1.0, 1.0 - d/15000.0)); // fallback simple
+        return Math.max(0.0, Math.min(1.0, 1.0 - d/15000.0));
     }
 
     // =========================
-    // HEURÍSTICA η (con capacidad global, espera y holgura)
+    // HEURÍSTICA
     // =========================
     static double heuristic(
             Pedido o, String actual, long tNow,
@@ -127,34 +126,30 @@ public class MoraPackACO {
 
         if (!f.origen.equals(actual)) return 0;
 
-        // ---- Ajuste multidía de salida/llegada ----
         long salida = f.salidaUTC;
         long llegada = f.llegadaUTC;
-        while (salida < tNow + MIN_CONEXION) { salida += 1440; llegada += 1440; } // empuja al día siguiente
+        while (salida < tNow + MIN_CONEXION) { salida += 1440; llegada += 1440; }
         salidaLlegadaAjustadas[0] = salida;
         salidaLlegadaAjustadas[1] = llegada;
 
-        // ---- Capacidad global real ----
         String k = key(f);
         int usado = usadoGlobal.getOrDefault(k,0) + usadoLocal.getOrDefault(k,0);
         int capDisp = f.capacidad - usado;
         if (capDisp < o.cantidad) return 0;
 
-        // ---- Componentes de heurística ----
-        double hCap   = capDisp / (double) f.capacidad;                 // [0,1]
-        double hProg  = progreso(f.destino, o.destino, inst);           // [0,1]
-        double wait   = Math.max(0, salida - tNow);                     // min
-        double hWait  = 1.0 / (1.0 + wait/60.0);                        // penaliza esperas largas
-        double slack  = o.dueUTC - llegada;                              // min, >0 si llega a tiempo
-        double hSlack = slack >= 0 ? 1.0 : 1.0 / (1.0 + (-slack)/60.0); // penaliza tardanzas
+        double hCap   = capDisp / (double) f.capacidad;
+        double hProg  = progreso(f.destino, o.destino, inst);
+        double wait   = Math.max(0, salida - tNow);
+        double hWait  = 1.0 / (1.0 + wait/45.0);
+        double slack  = o.dueUTC - llegada;
+        double hSlack = slack >= 0 ? 1.0 : Math.exp(slack/60.0);
 
-        // mezcla (puedes tunear pesos)
         double eta = 0.35*hCap + 0.30*hProg + 0.20*hWait + 0.15*hSlack;
         return Math.max(0, eta);
     }
 
     // =========================
-    // CONSTRUCCIÓN DE RUTA (con capacidad global y multidía)
+    // CONSTRUCCIÓN DE RUTA
     // =========================
     static Ruta construirRuta(Pedido o, Instancia inst, Map<String,Integer> usadoGlobal){
         String cur = o.origen;
@@ -171,13 +166,11 @@ public class MoraPackACO {
             List<Vuelo> cand = inst.grafo.getOrDefault(cur, List.of());
             if (cand.isEmpty()) return null;
 
-            // Probabilidades
             List<Vuelo> elegibles = new ArrayList<>();
             List<Double> pesos = new ArrayList<>();
             double sum = 0.0;
 
             for (Vuelo f: cand){
-                // evita ciclos fuertes
                 int visDest = visitas.getOrDefault(f.destino,0);
                 if (visDest >= MAX_VISITAS_AEROPUERTO) continue;
 
@@ -196,7 +189,6 @@ public class MoraPackACO {
 
             if (elegibles.isEmpty()) return null;
 
-            // Ruleta estable
             double r = RNG.nextDouble() * sum;
             Vuelo elegido = null;
             long salidaAdj = 0, llegadaAdj = 0;
@@ -205,7 +197,6 @@ public class MoraPackACO {
                 r -= pesos.get(i);
                 if (r <= 0 || i == elegibles.size()-1){
                     elegido = elegibles.get(i);
-                    // recomputa tiempos ajustados para el elegido
                     salidaAdj = elegido.salidaUTC;
                     llegadaAdj = elegido.llegadaUTC;
                     while (salidaAdj < tNow + MIN_CONEXION) { salidaAdj += 1440; llegadaAdj += 1440; }
@@ -215,12 +206,10 @@ public class MoraPackACO {
 
             if (elegido == null) return null;
 
-            // Aplica actualización local (PHI)
             String k = key(elegido);
             double tVal = tau.getOrDefault(k, TAU0);
             tau.put(k, (1.0 - PHI) * tVal + PHI * TAU0);
 
-            // Acepta el paso
             ruta.vuelos.add(elegido);
             usadoLocal.put(k, usadoLocal.getOrDefault(k,0)+o.cantidad);
             cur = elegido.destino;
@@ -229,45 +218,39 @@ public class MoraPackACO {
             hops++;
         }
 
-        if (!cur.equals(o.destino)) return null; // no llegó en el máximo de escalas
+        if (!cur.equals(o.destino)) return null;
 
         ruta.llegadaFinalUTC = tNow;
-        // on-time se decide fuera con el due del pedido (lo hacemos en construirSolucion)
         return ruta;
     }
 
     // =========================
-    // CONSTRUCCIÓN SOLUCIÓN (con capacidad global real)
+    // CONSTRUCCIÓN SOLUCIÓN
     // =========================
     static Solucion construirSolucion(Instancia inst){
         Solucion sol = new Solucion();
-
-        // Capacidad global consumida por vuelo (clave)
         Map<String,Integer> usadoGlobal = new HashMap<>();
 
-        // Orden de pedidos: urgentes primero puede ayudar (debido/holgura)
         List<Pedido> pedidos = new ArrayList<>(inst.pedidos);
-        pedidos.sort(Comparator.comparingLong(p -> p.dueUTC)); // opcional
+        pedidos.sort(Comparator.comparingLong(p -> p.dueUTC));
 
         for (Pedido o: pedidos){
             Ruta r = construirRuta(o, inst, usadoGlobal);
 
             if (r == null) {
-                sol.late++; // sin ruta -> cuenta como tardío/imposible
+                sol.late++;
                 continue;
             }
 
-            // Marca on-time y actualiza contador
             r.onTime = (r.llegadaFinalUTC <= o.dueUTC);
             if (r.onTime) sol.onTime++; else sol.late++;
 
             sol.rutas.put(o.id, r);
 
-            // Actualiza capacidad global y violaciones
             for (Vuelo f: r.vuelos){
                 String k = key(f);
                 int nuevo = usadoGlobal.getOrDefault(k,0) + o.cantidad;
-                if (nuevo > f.capacidad) sol.violCap++; // violación por arco
+                if (nuevo > f.capacidad) sol.violCap++;
                 usadoGlobal.put(k, nuevo);
             }
         }
@@ -277,15 +260,15 @@ public class MoraPackACO {
     }
 
     // =========================
-    // ACO PRINCIPAL (elitista + reset por estancamiento)
+    // ACO PRINCIPAL
     // =========================
     static Solucion ACO_MAIN(Instancia inst){
-        // inicializa feromonas
         for (Vuelo f: inst.vuelos) tau.putIfAbsent(key(f), TAU0);
 
         Solucion best = null;
         double bestObj = -1e18;
         int sinMejora = 0;
+        long t0 = System.currentTimeMillis();
 
         for (int it=0; it<MAX_ITER; it++){
             List<Solucion> sols = new ArrayList<>();
@@ -293,12 +276,10 @@ public class MoraPackACO {
             sols.sort(Comparator.comparingDouble(s->-s.obj));
             Solucion iterBest = sols.get(0);
 
-            // Evaporación
             for (String k: tau.keySet()){
                 tau.put(k, (1.0 - RHO) * tau.get(k));
             }
 
-            // Refuerzo (más peso a rutas on-time)
             for (Map.Entry<Integer, Ruta> e : iterBest.rutas.entrySet()){
                 Ruta r = e.getValue();
                 double bonus = r.onTime ? Q : Q * 0.1;
@@ -308,7 +289,6 @@ public class MoraPackACO {
                 }
             }
 
-            // Mejor global
             if (best == null || iterBest.obj > bestObj){
                 best = iterBest;
                 bestObj = iterBest.obj;
@@ -317,12 +297,26 @@ public class MoraPackACO {
                 sinMejora++;
             }
 
-            // Reset por estancamiento
+            if (it % 50 == 0 || it == MAX_ITER-1) {
+                double tauMax = tau.values().stream().mapToDouble(x->x).max().orElse(0);
+                double tauMin = tau.values().stream().mapToDouble(x->x).min().orElse(0);
+                long elapsed = System.currentTimeMillis() - t0;
+                System.out.printf(
+                    "Iter %4d | iterBest=%.2f | best=%.2f | onTime=%d | late=%d | viol=%d | tau[%.4f–%.4f] | t=%ds%n",
+                    it, iterBest.obj, bestObj, iterBest.onTime, iterBest.late, iterBest.violCap,
+                    tauMin, tauMax, elapsed/1000
+                );
+            }
+
             if (sinMejora >= STAGNATION_PATIENCE){
                 for (String k: tau.keySet()) tau.put(k, TAU0);
                 sinMejora = 0;
             }
         }
+
+        long t1 = System.currentTimeMillis();
+        System.out.println("⏱ Tiempo total ACO_MAIN = " + (t1 - t0) + " ms");
+
         return best;
     }
 
@@ -332,9 +326,8 @@ public class MoraPackACO {
     static Map<String,Aeropuerto> cargarAeropuertos(Path path) throws IOException {
         List<String> lineas = Files.readAllLines(path, Charset.forName("UTF-16"));
         Map<String,Aeropuerto> map = new HashMap<>();
-        String continente = "SA"; // valor por defecto
+        String continente = "SA";
 
-        // idx COD ciudad país alias GMT CAP   (lat/lon opcionales al final si existieran)
         Pattern fila = Pattern.compile("^\\s*\\d+\\s+([A-Z0-9]{3,4})\\s+(.+?)\\s+(.+?)\\s+[A-Za-z]{4}\\s+([+-]?\\d+)\\s+(\\d+).*$");
 
         for (String ln : lineas) {
@@ -354,7 +347,6 @@ public class MoraPackACO {
                 a.gmtOffset = Integer.parseInt(m.group(4).trim());
                 a.capacidadAlmacen = Integer.parseInt(m.group(5).trim());
                 a.continente = continente;
-                // Si hay lat/lon en tu archivo, agrégales un parse aquí.
                 map.put(a.codigo, a);
             }
         }
@@ -375,7 +367,7 @@ public class MoraPackACO {
             Aeropuerto ao = aeropuertos.get(v.origen);
             Aeropuerto ad = aeropuertos.get(v.destino);
             if (ao == null || ad == null) {
-                System.out.println("[WARN] Vuelo ignorado por falta de aeropuerto: " + v.origen + "->" + v.destino);
+                System.out.println("[WARN] Vuelo ignorado: " + v.origen + "->" + v.destino);
                 continue;
             }
 
@@ -385,6 +377,34 @@ public class MoraPackACO {
             lista.add(v);
         }
         return lista;
+    }
+
+    static List<Pedido> construirGrupoPedidos(Instancia inst, LocalDate ancla, String[][] pares, int startId) {
+        List<Pedido> pedidos = new ArrayList<>();
+        int id = startId;
+
+        for (String[] par : pares) {
+            String o = par[0], d = par[1];
+
+            if (!inst.aeropuertos.containsKey(o) || !inst.aeropuertos.containsKey(d)) {
+                System.out.println("[WARN] Pedido ignorado: " + o + " -> " + d);
+                continue;
+            }
+
+            Pedido p = new Pedido();
+            p.id = id++;
+            p.origen = o;
+            p.destino = d;
+            p.cantidad = 80 + RNG.nextInt(100);
+            p.releaseUTC = ancla.atTime(6 + RNG.nextInt(6), RNG.nextInt(60))
+                                .toEpochSecond(ZoneOffset.UTC) / 60;
+
+            boolean same = mismoContinente(inst.aeropuertos.get(o), inst.aeropuertos.get(d));
+            p.dueUTC = p.releaseUTC + (same ? PLAZO_INTRA.toMinutes() : PLAZO_INTER.toMinutes());
+
+            pedidos.add(p);
+        }
+        return pedidos;
     }
 
     // =========================
@@ -399,46 +419,26 @@ public class MoraPackACO {
         inst.aeropuertos = cargarAeropuertos(aTxt);
         inst.vuelos = cargarVuelos(vTxt, inst.aeropuertos, ancla);
 
-        // Construye grafo y ordena por hora de salida
         for (Vuelo f : inst.vuelos)
             inst.grafo.computeIfAbsent(f.origen, k -> new ArrayList<>()).add(f);
         for (List<Vuelo> lst : inst.grafo.values())
             lst.sort(Comparator.comparingLong(v -> v.salidaUTC));
 
-        // === DEMO: 8 pedidos con variedad ===
-        List<Pedido> pedidos = new ArrayList<>();
-        String[][] pares = {
-            {"SCEL", "SABE"},  // (1) Santiago -> Buenos Aires
-            {"SPIM", "SGAS"},  // (2) Lima -> Asunción
-            {"SPIM", "SLLP"},  // (3) Lima -> La Paz
-            {"SKBO", "SEQM"},  // (4) Bogotá -> Quito
-            {"SPIM", "EHAM"},  // (5) Lima -> Amsterdam
-            {"SPIM", "LATI"},  // (6) Lima -> Tirana
-            {"SBBR", "OMDB"},  // (7) Brasilia -> Dubái
-            {"SPIM", "ZZZZ"}   // (8) Lima -> destino inexistente
+        String[][] paresGrupo = {
+            {"SGAS", "LOWW"},  // Asunción (SA) -> Viena (EU)
+            {"SABE", "EHAM"},  // Buenos Aires (SA) -> Ámsterdam (EU)
+            {"SKBO", "OMDB"},  // Bogotá (SA) -> Dubái (AS)
+            {"SCEL", "LATI"},  // Santiago (SA) -> Tirana (EU)
+            {"SEQM", "UBBB"},  // Quito (SA) -> Bakú (AS)
+            {"SBBR", "EHAM"},   // Brasilia (SA) -> Ámsterdam (EU)
+            {"SEQM", "SPIM"},  // Quito (SA) -> Lima (SA)
+            {"SABE", "SGAS"},  // Buenos Aires (SA) -> Asunción (SA)
+            {"EHAM", "LOWW"},  // Ámsterdam (EU) -> Viena (EU)
+            {"OMDB", "UBBB"}   // Dubái (AS) -> Bakú (AS)
         };
 
-        int id = 1;
-        for (String[] par : pares) {
-            String o = par[0], d = par[1];
-            Pedido p = new Pedido();
-            p.id = id++;
-            p.origen = o;
-            p.destino = d;
-            p.cantidad = 80 + RNG.nextInt(100); // 80–180 paquetes
-            p.releaseUTC = ancla.atTime(6 + RNG.nextInt(6), RNG.nextInt(60))
-                            .toEpochSecond(ZoneOffset.UTC) / 60;
-            if (inst.aeropuertos.containsKey(o) && inst.aeropuertos.containsKey(d)) {
-                boolean same = mismoContinente(inst.aeropuertos.get(o), inst.aeropuertos.get(d));
-                p.dueUTC = p.releaseUTC + (same ? PLAZO_INTRA.toMinutes() : PLAZO_INTER.toMinutes());
-            } else {
-                p.dueUTC = p.releaseUTC + PLAZO_INTER.toMinutes();
-            }
-            pedidos.add(p);
-        }
-        inst.pedidos = pedidos;
-
-        // Ejecutar ACO
+        List<Pedido> pedidosGrupo = construirGrupoPedidos(inst, ancla, paresGrupo,1);
+        inst.pedidos = pedidosGrupo; 
         Solucion best = ACO_MAIN(inst);
 
         // === Reporte ===
@@ -463,7 +463,7 @@ public class MoraPackACO {
                 for (int i=0; i<r.vuelos.size(); i++) {
                     Vuelo v = r.vuelos.get(i);
                     sb.append(v.origen).append("->").append(v.destino);
-                    if (i < r.vuelos.size()-1) sb.append("->");
+                    if (i < r.vuelos.size()-1) sb.append("||");
                 }
                 sb.append("] ");
                 sb.append(r.onTime ? "(on-time)" : "(late)");
@@ -472,4 +472,5 @@ public class MoraPackACO {
             }
         }
     }
+
 }
