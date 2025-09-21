@@ -1,0 +1,7 @@
+{
+    "java.project.sourcePaths": [
+        "src\\main\\java\\com\\twoalg\\alg1",
+        "src\\main\\java\\com\\twoalg\\alg2"
+    ],
+    "java.project.referencedLibraries": []
+}
