@@ -11,332 +11,487 @@ public class MoraPackACO {
     // =========================
     // PARÁMETROS DE NEGOCIO
     // =========================
-    static final int MIN_CONEXION = 30; // minutos conexión mínima
-    static final Duration PLAZO_INTRA = Duration.ofDays(2); // plazo intra-continente
-    static final Duration PLAZO_INTER = Duration.ofDays(3); // plazo inter-continente
+    static final int MINUTOS_CONEXION_MINIMA = 60;                     // tiempo mínimo de conexión
+    static final Duration SLA_MISMO_CONTINENTE = Duration.ofDays(2);   // SLA si origen y destino están en el mismo continente
+    static final Duration SLA_CONTINENTES_DISTINTOS = Duration.ofDays(3); // SLA si cruza continentes
+    static final Set<String> CODIGOS_HUBS = Set.of("SPIM","EBCI","UBBB"); // Lima, Bruselas, Bakú
 
     // =========================
-    // PARÁMETROS ACO
+    // ACO (ACS: Ant Colony System)
     // =========================
-    static int N_HORMIGAS = 125;
-    static int MAX_ITER = 300;
-    static double ALPHA = 1.5;
-    static double BETA = 4.5;
-    static double RHO = 0.04;    // evaporación
-    static double PHI = 0.10;    // actualización local
-    static double TAU0 = 0.01;   // feromona inicial
-    static double Q = 1.5;       // refuerzo
+    static int NUM_HORMIGAS = 90;
+    static int MAX_ITERACIONES = 240;
 
-    // Restricciones
-    static final int MAX_ESCALAS = 8;
-    static final int MAX_VISITAS_AEROPUERTO = 2;
-    static final int STAGNATION_PATIENCE = 80;
+    static double PESO_FEROMONA = 1.2;              // (α) peso de feromona
+    static double PESO_HEURISTICA = 5.0;            // (β) peso de la heurística
+    static double TASA_EVAPORACION_GLOBAL = 0.06;   // (ρ) evaporación global
+    static double TASA_ACTUALIZACION_LOCAL = 0.10;  // (φ) actualización local
+    static double FEROMONA_INICIAL = 0.01;          // τ0 feromona inicial
+    static double INTENSIDAD_REFUERZO = 1.5;        // Q refuerzo global
+    static double FRACCION_REFUERZO_ELITE = 0.35;   // porción del refuerzo para el mejor de iteración
+    static double PROBABILIDAD_EXPLOTAR = 0.20;     // q0 (ACS): prob. de explotar (elegir el mejor candidato)
+
+    // Límites tipo MMAS (suaves)
+    static double FEROMONA_MIN = 1e-6;
+    static double FEROMONA_MAX = 10.0;
+
+    // =========================
+    // RESTRICCIONES DE RUTA
+    // =========================
+    static final int MAX_ESCALAS = 4;
+    static final int MAX_VISITAS_POR_AEROPUERTO = 1;
+    static final int PACIENCIA_ESTANCAMIENTO = 50;
+    static final boolean EVITAR_RETROCESO = true;
+
+    // Activar/desactivar reglas de continentes
+    static final boolean APLICAR_REGLAS_CONTINENTE = true;
+
+    // =========================
+    // SPLIT DE PEDIDOS / CORTE SLA
+    // =========================
+    static final int TAM_MAX_SUBPEDIDO = 150;       // tamaño máximo de sub-pedido (chunk)
+    static final int TOLERANCIA_RETRASO_MINUTOS = 90;  // descartar si llega > SLA + 90 min
+
+    // =========================
+    // LISTA CANDIDATA / BÚSQUEDA
+    // =========================
+    static final int TAMANIO_LISTA_CANDIDATOS = 8;
+
+    // =========================
+    // ANALÍTICA / ROBUSTEZ
+    // =========================
+    static final int SLACK_CRITICO_MINUTOS = 120; // marcar sub-pedido crítico si slack <= 120 min
+    static final int COLCHON_SEGURIDAD_MINUTOS = 0; // colchón exigido por la heurística (0 = desactivado)
 
     // =========================
     // MODELOS
     // =========================
     static class Aeropuerto {
-        String codigo;
-        String ciudad, pais, continente;
-        int gmtOffset;
-        int capacidadAlmacen;
+        String codigo, ciudad, pais, continente;
+        int desfaseGMT, capacidadAlmacen;
         double lat = Double.NaN, lon = Double.NaN;
     }
-
     static class Vuelo {
-        String origen, destino;
-        String horaOrigen, horaDestino;
+        String origen, destino, horaOrigen, horaDestino;
         int capacidad;
-        long salidaUTC, llegadaUTC;
-
+        long salidaUTC, llegadaUTC; // minutos desde época (día ancla)
         public String toString(){ return origen+"->"+destino+"("+horaOrigen+"-"+horaDestino+")"; }
     }
-
     static class Pedido {
         int id;
         String origen, destino;
-        int cantidad;
-        long releaseUTC, dueUTC;
+        int cantidad;                // 1..999
+        long liberacionUTC, vencimientoUTC;  // liberación (en TZ destino) y vencimiento por SLA
+        int idPedidoOriginal = -1;   // -1 si no proviene de split
+        int indiceSubpedido = 1;     // 1..K
+        int totalSubpedidos = 1;     // K total
     }
-
+    static class Segmento {
+        Vuelo vuelo;
+        long salidaAjustadaUTC;  // minutos UTC con día ajustado
+        long llegadaAjustadaUTC; // minutos UTC con día ajustado
+        Segmento(Vuelo v, long s, long l){ this.vuelo=v; this.salidaAjustadaUTC=s; this.llegadaAjustadaUTC=l; }
+    }
     static class Ruta {
-        List<Vuelo> vuelos = new ArrayList<>();
+        List<Segmento> segmentos = new ArrayList<>();
         long llegadaFinalUTC;
-        boolean onTime;
+        boolean aTiempo;
     }
-
     static class Instancia {
         Map<String, Aeropuerto> aeropuertos = new HashMap<>();
         List<Vuelo> vuelos = new ArrayList<>();
-        Map<String,List<Vuelo>> grafo = new HashMap<>();
+        Map<String,List<Vuelo>> vuelosPorOrigen = new HashMap<>();
         List<Pedido> pedidos = new ArrayList<>();
-    }
+        LocalDate fechaAncla;
+        int diasMes;
 
+        // Fallback de progreso por hops (distancia en saltos)
+        Map<String,Integer> indiceAeropuerto = new HashMap<>();
+        String[] indiceAAeropuerto;
+        int[][] distanciaSaltos;   // [i][j] min saltos i->j
+        int normalizadorSaltos = 1;
+    }
     static class Solucion {
         Map<Integer,Ruta> rutas = new HashMap<>();
-        int onTime=0, late=0, violCap=0;
-        double obj=0;
+        int subpedidosATiempo=0, subpedidosTarde=0, violacionesCapacidad=0;
+        double valorObjetivo=0;
+    }
+    static class ResumenPedidoOriginal {
+        int idPedidoOriginal, totalCantidad, subpedidos, subpedidosATiempo;
+        boolean pedidoCompletoATiempo;
     }
 
     // =========================
-    // FEROMONAS
+    // FEROMONAS / RNG
     // =========================
-    static String key(Vuelo v){ return v.origen+"|"+v.destino+"|"+v.horaOrigen+"|"+v.horaDestino; }
-    static Map<String, Double> tau = new HashMap<>();
-    static Random RNG = new Random();
+    static String claveVuelo(Vuelo v){ return v.origen+"|"+v.destino+"|"+v.horaOrigen+"|"+v.horaDestino; }
+    static Map<String, Double> feromona = new HashMap<>();
+    static Random azar = new Random();
 
     // =========================
-    // UTILIDADES
+    // UTILIDADES DE TIEMPO/FORMATO
     // =========================
-    static long toUTC(String hhmm, int gmt, LocalDate ancla){
+    static long aUTC(String hhmm, int gmt, LocalDate ancla){
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("HH:mm");
         LocalTime lt = LocalTime.parse(hhmm, fmt);
         LocalDateTime localDT = LocalDateTime.of(ancla, lt);
         int minutos = gmt * 60;
         return localDT.toEpochSecond(ZoneOffset.ofTotalSeconds(minutos*60))/60L;
     }
-
     static boolean mismoContinente(Aeropuerto a, Aeropuerto b){
         return a!=null && b!=null && Objects.equals(a.continente,b.continente);
     }
-
-    static double haversine(double lat1,double lon1,double lat2,double lon2){
+    static double distanciaHaversine(double lat1,double lon1,double lat2,double lon2){
         double R=6371.0, dLat=Math.toRadians(lat2-lat1), dLon=Math.toRadians(lon2-lon1);
         double a=Math.sin(dLat/2)*Math.sin(dLat/2)+
-                 Math.cos(Math.toRadians(lat1))*Math.cos(Math.toRadians(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+                Math.cos(Math.toRadians(lat1))*Math.cos(Math.toRadians(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
         double c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
         return R*c;
     }
-
-    static double progreso(String actual,String destino,Instancia inst){
+    static String hubParaContinente(String continente){
+        switch (continente){
+            case "SA": return "SPIM";
+            case "EU": return "EBCI";
+            case "AS": return "UBBB";
+            default:   return "SPIM";
+        }
+    }
+    static String continente(String apt, Instancia inst){
+        Aeropuerto a = inst.aeropuertos.get(apt);
+        return a==null? null : a.continente;
+    }
+    // Progreso geográfico si hay lat/lon; si no, usa fallback por saltos
+    static double progresoHaciaDestino(String actual, String destino, Instancia inst){
         Aeropuerto a=inst.aeropuertos.get(actual), b=inst.aeropuertos.get(destino);
         if (a==null||b==null) return 0.0;
-        if (Double.isNaN(a.lat) || Double.isNaN(a.lon) || Double.isNaN(b.lat) || Double.isNaN(b.lon)) return 0.0;
-        double d=haversine(a.lat,a.lon,b.lat,b.lon);
-        return Math.max(0.0, Math.min(1.0, 1.0 - d/15000.0));
+
+        boolean geoOK = !Double.isNaN(a.lat) && !Double.isNaN(a.lon) && !Double.isNaN(b.lat) && !Double.isNaN(b.lon);
+        if (geoOK){
+            double d=distanciaHaversine(a.lat,a.lon,b.lat,b.lon);
+            return Math.max(0.0, Math.min(1.0, 1.0 - d/15000.0));
+        } else {
+            Integer ia = inst.indiceAeropuerto.get(actual), ib = inst.indiceAeropuerto.get(destino);
+            if (ia==null || ib==null) return 0.0;
+            int d = inst.distanciaSaltos[ia][ib];
+            if (d >= 1_000_000) return 0.0; // inalcanzable
+            double norm = Math.max(1.0, inst.normalizadorSaltos);
+            return Math.max(0.0, Math.min(1.0, 1.0 - d / norm));
+        }
+    }
+    static int dayIndexLocal(long utcMin, int gmt, LocalDate ancla){
+        long base = ancla.atStartOfDay().toEpochSecond(ZoneOffset.ofHours(gmt))/60L;
+        long diff = utcMin - base;
+        return (int)Math.floorDiv(diff, 1440L);
+    }
+    static String fmtLocalDHHMM(long utcMin, Aeropuerto apt, LocalDate ancla){
+        int d = dayIndexLocal(utcMin, apt.desfaseGMT, ancla);
+        OffsetDateTime odt = Instant.ofEpochSecond(utcMin*60L).atOffset(ZoneOffset.ofHours(apt.desfaseGMT));
+        return String.format("D-%d %s", d, odt.toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm")));
+    }
+
+    // Capacidad POR DÍA ajustado del vuelo
+    static String claveCapacidadVueloDia(Vuelo v, long salidaAjustada){
+        long base = v.salidaUTC;
+        int indiceDia = (int)Math.floorDiv(salidaAjustada - base, 1440L);
+        return claveVuelo(v) + "|" + indiceDia;
     }
 
     // =========================
     // HEURÍSTICA
     // =========================
-    static double heuristic(
-            Pedido o, String actual, long tNow,
-            Vuelo f, Map<String,Integer> usadoLocal, Map<String,Integer> usadoGlobal,
+    static double evaluarHeuristica(
+            Pedido pedido, String aeropuertoActual, long tiempoActualUTC,
+            Vuelo vuelo, Map<String,Integer> capacidadUsadaLocalVueloDia, Map<String,Integer> capacidadUsadaGlobalVueloDia,
             Instancia inst, long[] salidaLlegadaAjustadas) {
 
-        if (!f.origen.equals(actual)) return 0;
+        if (!vuelo.origen.equals(aeropuertoActual)) return 0;
 
-        long salida = f.salidaUTC;
-        long llegada = f.llegadaUTC;
-        while (salida < tNow + MIN_CONEXION) { salida += 1440; llegada += 1440; }
+        long salida = vuelo.salidaUTC, llegada = vuelo.llegadaUTC;
+        while (salida < tiempoActualUTC + MINUTOS_CONEXION_MINIMA) { salida += 1440; llegada += 1440; }
+
         salidaLlegadaAjustadas[0] = salida;
         salidaLlegadaAjustadas[1] = llegada;
 
-        String k = key(f);
-        int usado = usadoGlobal.getOrDefault(k,0) + usadoLocal.getOrDefault(k,0);
-        int capDisp = f.capacidad - usado;
-        if (capDisp < o.cantidad) return 0;
+        // Corte duro por SLA
+        if (llegada > pedido.vencimientoUTC + TOLERANCIA_RETRASO_MINUTOS) return 0;
 
-        double hCap   = capDisp / (double) f.capacidad;
-        double hProg  = progreso(f.destino, o.destino, inst);
-        double wait   = Math.max(0, salida - tNow);
-        double hWait  = 1.0 / (1.0 + wait/45.0);
-        double slack  = o.dueUTC - llegada;
-        double hSlack = slack >= 0 ? 1.0 : Math.exp(slack/60.0);
+        // Capacidad por vuelo-día
+        String claveDia = claveCapacidadVueloDia(vuelo, salida);
+        int usado = capacidadUsadaGlobalVueloDia.getOrDefault(claveDia,0) + capacidadUsadaLocalVueloDia.getOrDefault(claveDia,0);
+        int capacidadDisponible = vuelo.capacidad - usado;
+        if (capacidadDisponible < pedido.cantidad) return 0;
 
-        double eta = 0.35*hCap + 0.30*hProg + 0.20*hWait + 0.15*hSlack;
+        // Señales heurísticas
+        double hCap   = capacidadDisponible / (double) vuelo.capacidad;
+        double hProg  = progresoHaciaDestino(vuelo.destino, pedido.destino, inst);
+        double espera = Math.max(0, salida - tiempoActualUTC);
+        double hWait  = 1.0 / (1.0 + espera/45.0);
+
+        double slackBruto = pedido.vencimientoUTC - llegada;
+        double slackAjustado = slackBruto - COLCHON_SEGURIDAD_MINUTOS;
+        double hSlack = slackAjustado >= 0 ? 1.0 : Math.exp(slackAjustado/60.0);
+
+        double eta = 0.20*hCap + 0.45*hProg + 0.20*hWait + 0.15*hSlack;
         return Math.max(0, eta);
     }
 
     // =========================
-    // CONSTRUCCIÓN DE RUTA
+    // CONSTRUCCIÓN DE RUTA (ACS)
     // =========================
-    static Ruta construirRuta(Pedido o, Instancia inst, Map<String,Integer> usadoGlobal){
-        String cur = o.origen;
-        long tNow = o.releaseUTC;
-
-        Map<String,Integer> usadoLocal = new HashMap<>();
-        Map<String,Integer> visitas = new HashMap<>();
-        visitas.put(cur, 1);
-
+    static Ruta construirRutaParaPedido(Pedido pedido, Instancia inst, Map<String,Integer> capacidadUsadaGlobalVueloDia){
+        String actual = pedido.origen, previo = null;
+        long tiempoActual = pedido.liberacionUTC;
+        Map<String,Integer> capacidadUsadaLocalVueloDia = new HashMap<>();
+        Map<String,Integer> visitasPorAeropuerto = new HashMap<>();
+        visitasPorAeropuerto.put(actual, 1);
         Ruta ruta = new Ruta();
         int hops = 0;
 
-        while(!cur.equals(o.destino) && hops < MAX_ESCALAS){
-            List<Vuelo> cand = inst.grafo.getOrDefault(cur, List.of());
-            if (cand.isEmpty()) return null;
+        String contOrig = continente(pedido.origen, inst);
+        String contDest = continente(pedido.destino, inst);
+        boolean mismoCont = Objects.equals(contOrig, contDest);
 
-            List<Vuelo> elegibles = new ArrayList<>();
-            List<Double> pesos = new ArrayList<>();
-            double sum = 0.0;
+        while(!actual.equals(pedido.destino) && hops < MAX_ESCALAS){
+            List<Vuelo> candidatosDesdeActual = inst.vuelosPorOrigen.getOrDefault(actual, List.of());
+            if (candidatosDesdeActual.isEmpty()) return null;
 
-            for (Vuelo f: cand){
-                int visDest = visitas.getOrDefault(f.destino,0);
-                if (visDest >= MAX_VISITAS_AEROPUERTO) continue;
+            class CandidatoVuelo { Vuelo v; double valor; long salida; long llegada; }
+            PriorityQueue<CandidatoVuelo> pq = new PriorityQueue<>(Comparator.comparingDouble(c -> -c.valor));
 
-                long[] times = new long[2];
-                double eta = heuristic(o, cur, tNow, f, usadoLocal, usadoGlobal, inst, times);
+            String contActual = continente(actual, inst);
+
+            for (Vuelo v: candidatosDesdeActual){
+                int visitasDestino = visitasPorAeropuerto.getOrDefault(v.destino,0);
+                if (visitasDestino >= MAX_VISITAS_POR_AEROPUERTO) continue;
+                if (EVITAR_RETROCESO && previo != null && v.destino.equals(previo)) continue;
+
+                // ======== REGLA DE CONTINENTES ========
+                if (APLICAR_REGLAS_CONTINENTE){
+                    String contSiguiente = continente(v.destino, inst);
+                    if (contSiguiente == null) continue;
+
+                    if (mismoCont) {
+                        // nunca salgas del continente del pedido
+                        if (!Objects.equals(contSiguiente, contDest)) continue;
+                    } else {
+                        // inter-continente: de origen me quedo o salto directo al continente destino; al entrar al destino no salgo más
+                        if (Objects.equals(contActual, contDest)) {
+                            if (!Objects.equals(contSiguiente, contDest)) continue;
+                        } else if (Objects.equals(contActual, contOrig)) {
+                            if (!(Objects.equals(contSiguiente, contOrig) || Objects.equals(contSiguiente, contDest))) continue;
+                        } else {
+                            if (!(Objects.equals(contSiguiente, contActual) || Objects.equals(contSiguiente, contDest))) continue;
+                        }
+                    }
+                }
+                // ======================================
+
+                long[] tiempos = new long[2];
+                double eta = evaluarHeuristica(pedido, actual, tiempoActual, v, capacidadUsadaLocalVueloDia, capacidadUsadaGlobalVueloDia, inst, tiempos);
                 if (eta <= 0) continue;
 
-                String k = key(f);
-                double t = tau.getOrDefault(k, TAU0);
-                double val = Math.pow(t, ALPHA) * Math.pow(eta, BETA);
+                double t = feromona.getOrDefault(claveVuelo(v), FEROMONA_INICIAL);
+                double valor = Math.pow(Math.max(FEROMONA_MIN, Math.min(FEROMONA_MAX, t)), PESO_FEROMONA) * Math.pow(eta, PESO_HEURISTICA);
 
-                elegibles.add(f);
-                pesos.add(val);
-                sum += val;
+                CandidatoVuelo c = new CandidatoVuelo(); c.v = v; c.valor = valor; c.salida=tiempos[0]; c.llegada=tiempos[1];
+                pq.offer(c);
             }
+            if (pq.isEmpty()) return null;
 
-            if (elegibles.isEmpty()) return null;
+            List<CandidatoVuelo> listaCandidatos = new ArrayList<>();
+            for (int i=0; i<TAMANIO_LISTA_CANDIDATOS && !pq.isEmpty(); i++) listaCandidatos.add(pq.poll());
 
-            double r = RNG.nextDouble() * sum;
-            Vuelo elegido = null;
-            long salidaAdj = 0, llegadaAdj = 0;
-
-            for (int i=0; i<elegibles.size(); i++){
-                r -= pesos.get(i);
-                if (r <= 0 || i == elegibles.size()-1){
-                    elegido = elegibles.get(i);
-                    salidaAdj = elegido.salidaUTC;
-                    llegadaAdj = elegido.llegadaUTC;
-                    while (salidaAdj < tNow + MIN_CONEXION) { salidaAdj += 1440; llegadaAdj += 1440; }
-                    break;
+            CandidatoVuelo elegido = null;
+            if (!listaCandidatos.isEmpty()){
+                if (azar.nextDouble() < PROBABILIDAD_EXPLOTAR){
+                    elegido = listaCandidatos.get(0);
+                } else {
+                    double sum = 0.0;
+                    for (CandidatoVuelo c: listaCandidatos) sum += c.valor;
+                    double r = azar.nextDouble() * sum;
+                    for (int i=0;i<listaCandidatos.size();i++){
+                        r -= listaCandidatos.get(i).valor;
+                        if (r <= 0 || i==listaCandidatos.size()-1){ elegido = listaCandidatos.get(i); break; }
+                    }
                 }
             }
-
             if (elegido == null) return null;
 
-            String k = key(elegido);
-            double tVal = tau.getOrDefault(k, TAU0);
-            tau.put(k, (1.0 - PHI) * tVal + PHI * TAU0);
+            // actualización local de feromona
+            String k = claveVuelo(elegido.v);
+            double tVal = feromona.getOrDefault(k, FEROMONA_INICIAL);
+            double nuevo = (1.0 - TASA_ACTUALIZACION_LOCAL) * tVal + TASA_ACTUALIZACION_LOCAL * FEROMONA_INICIAL;
+            feromona.put(k, limitarEntre(nuevo, FEROMONA_MIN, FEROMONA_MAX));
 
-            ruta.vuelos.add(elegido);
-            usadoLocal.put(k, usadoLocal.getOrDefault(k,0)+o.cantidad);
-            cur = elegido.destino;
-            tNow = llegadaAdj;
-            visitas.put(cur, visitas.getOrDefault(cur,0)+1);
+            // reservar capacidad local por DÍA
+            String claveDia = claveCapacidadVueloDia(elegido.v, elegido.salida);
+            capacidadUsadaLocalVueloDia.put(claveDia, capacidadUsadaLocalVueloDia.getOrDefault(claveDia,0) + pedido.cantidad);
+
+            ruta.segmentos.add(new Segmento(elegido.v, elegido.salida, elegido.llegada));
+
+            String anterior = actual;
+            actual = elegido.v.destino;
+            previo = anterior;
+            tiempoActual = elegido.llegada;
+            visitasPorAeropuerto.put(actual, visitasPorAeropuerto.getOrDefault(actual,0)+1);
             hops++;
         }
 
-        if (!cur.equals(o.destino)) return null;
-
-        ruta.llegadaFinalUTC = tNow;
+        if (!actual.equals(pedido.destino)) return null;
+        ruta.llegadaFinalUTC = tiempoActual;
         return ruta;
     }
 
     // =========================
-    // CONSTRUCCIÓN SOLUCIÓN
+    // CONSTRUCCIÓN DE SOLUCIÓN (con tope de capacidad diaria global)
     // =========================
-    static Solucion construirSolucion(Instancia inst){
+    static Solucion construirSolucionGlobal(Instancia inst){
         Solucion sol = new Solucion();
-        Map<String,Integer> usadoGlobal = new HashMap<>();
+
+        // Capacidad por vuelo-día
+        Map<String,Integer> capacidadUsadaGlobalVueloDia = new HashMap<>();
+
+        // Capacidad diaria global (suma de capacidades de todos los vuelos por díaIdx)
+        int capacidadTotalDiaria = capacidadTotalDiaria(inst);
+        Map<Integer,Integer> capacidadUsadaGlobalDia = new HashMap<>(); // dayIdx -> producto usado
 
         List<Pedido> pedidos = new ArrayList<>(inst.pedidos);
-        pedidos.sort(Comparator.comparingLong(p -> p.dueUTC));
+        pedidos.sort(Comparator.<Pedido>comparingLong(p -> p.vencimientoUTC).thenComparingInt(p -> -p.cantidad)); // prioriza más producto
 
-        for (Pedido o: pedidos){
-            Ruta r = construirRuta(o, inst, usadoGlobal);
+        for (Pedido p: pedidos){
+            Ruta r = construirRutaParaPedido(p, inst, capacidadUsadaGlobalVueloDia);
+            if (r == null) { sol.subpedidosTarde++; continue; }
 
-            if (r == null) {
-                sol.late++;
-                continue;
+            // chequeo de tope diario global por cada día de salida de los segmentos
+            Map<Integer,Integer> aAgregarPorDia = new HashMap<>();
+            boolean okDia = true;
+            for (Segmento s: r.segmentos){
+                int indiceDia = indiceDiaDeSalida(s);
+                int add = aAgregarPorDia.getOrDefault(indiceDia, 0) + p.cantidad; // cada segmento consume la cantidad en su día
+                if (capacidadUsadaGlobalDia.getOrDefault(indiceDia, 0) + add > capacidadTotalDiaria) {
+                    okDia = false; break;
+                }
+                aAgregarPorDia.put(indiceDia, add);
             }
+            if (!okDia){ sol.subpedidosTarde++; continue; }
 
-            r.onTime = (r.llegadaFinalUTC <= o.dueUTC);
-            if (r.onTime) sol.onTime++; else sol.late++;
+            // Si pasa el tope global, registrar ruta y consumos
+            r.aTiempo = (r.llegadaFinalUTC <= p.vencimientoUTC);
+            if (r.aTiempo) sol.subpedidosATiempo++; else sol.subpedidosTarde++;
+            sol.rutas.put(p.id, r);
 
-            sol.rutas.put(o.id, r);
-
-            for (Vuelo f: r.vuelos){
-                String k = key(f);
-                int nuevo = usadoGlobal.getOrDefault(k,0) + o.cantidad;
-                if (nuevo > f.capacidad) sol.violCap++;
-                usadoGlobal.put(k, nuevo);
+            for (Map.Entry<Integer,Integer> e : aAgregarPorDia.entrySet()){
+                int d = e.getKey();
+                capacidadUsadaGlobalDia.put(d, capacidadUsadaGlobalDia.getOrDefault(d,0) + e.getValue());
+            }
+            for (Segmento s: r.segmentos){
+                String claveDia = claveCapacidadVueloDia(s.vuelo, s.salidaAjustadaUTC);
+                int nuevo = capacidadUsadaGlobalVueloDia.getOrDefault(claveDia,0) + p.cantidad;
+                if (nuevo > s.vuelo.capacidad) sol.violacionesCapacidad++;
+                capacidadUsadaGlobalVueloDia.put(claveDia, nuevo);
             }
         }
 
-        sol.obj = sol.onTime - 3*sol.late - 5*sol.violCap;
+        // Función objetivo: producto a tiempo penalizando tardanzas y violaciones
+        long productoATiempo = inst.pedidos.stream()
+                .filter(p -> sol.rutas.get(p.id)!=null && sol.rutas.get(p.id).aTiempo)
+                .mapToLong(p -> p.cantidad).sum();
+        long productoTarde = inst.pedidos.stream()
+                .filter(p -> sol.rutas.get(p.id)==null || !sol.rutas.get(p.id).aTiempo)
+                .mapToLong(p -> p.cantidad).sum();
+
+        sol.valorObjetivo = productoATiempo - 3*productoTarde - 5*sol.violacionesCapacidad;
         return sol;
     }
 
-    // =========================
-    // ACO PRINCIPAL
-    // =========================
-    static Solucion ACO_MAIN(Instancia inst){
-        for (Vuelo f: inst.vuelos) tau.putIfAbsent(key(f), TAU0);
+    static int indiceDiaDeSalida(Segmento s){
+        long base = s.vuelo.salidaUTC;
+        return (int)Math.floorDiv(s.salidaAjustadaUTC - base, 1440L);
+    }
 
-        Solucion best = null;
-        double bestObj = -1e18;
-        int sinMejora = 0;
-        long t0 = System.currentTimeMillis();
-
-        for (int it=0; it<MAX_ITER; it++){
-            List<Solucion> sols = new ArrayList<>();
-            for (int k=0; k<N_HORMIGAS; k++) sols.add(construirSolucion(inst));
-            sols.sort(Comparator.comparingDouble(s->-s.obj));
-            Solucion iterBest = sols.get(0);
-
-            for (String k: tau.keySet()){
-                tau.put(k, (1.0 - RHO) * tau.get(k));
-            }
-
-            for (Map.Entry<Integer, Ruta> e : iterBest.rutas.entrySet()){
-                Ruta r = e.getValue();
-                double bonus = r.onTime ? Q : Q * 0.1;
-                for (Vuelo f: r.vuelos){
-                    String k = key(f);
-                    tau.put(k, tau.getOrDefault(k, TAU0) + bonus);
-                }
-            }
-
-            if (best == null || iterBest.obj > bestObj){
-                best = iterBest;
-                bestObj = iterBest.obj;
-                sinMejora = 0;
-            } else {
-                sinMejora++;
-            }
-
-            if (it % 50 == 0 || it == MAX_ITER-1) {
-                double tauMax = tau.values().stream().mapToDouble(x->x).max().orElse(0);
-                double tauMin = tau.values().stream().mapToDouble(x->x).min().orElse(0);
-                long elapsed = System.currentTimeMillis() - t0;
-                System.out.printf(
-                    "Iter %4d | iterBest=%.2f | best=%.2f | onTime=%d | late=%d | viol=%d | tau[%.4f–%.4f] | t=%ds%n",
-                    it, iterBest.obj, bestObj, iterBest.onTime, iterBest.late, iterBest.violCap,
-                    tauMin, tauMax, elapsed/1000
-                );
-            }
-
-            if (sinMejora >= STAGNATION_PATIENCE){
-                for (String k: tau.keySet()) tau.put(k, TAU0);
-                sinMejora = 0;
-            }
-        }
-
-        long t1 = System.currentTimeMillis();
-        System.out.println("⏱ Tiempo total ACO_MAIN = " + (t1 - t0) + " ms");
-
-        return best;
+    static int capacidadTotalDiaria(Instancia inst){
+        int sum = 0;
+        for (Vuelo v : inst.vuelos) sum += v.capacidad;
+        return sum;
     }
 
     // =========================
-    // LECTURA INPUTS
+    // ACO PRINCIPAL (silencioso)
     // =========================
-    static Map<String,Aeropuerto> cargarAeropuertos(Path path) throws IOException {
+    static Solucion ejecutarACO(Instancia inst){
+        feromona.clear();
+        for (Vuelo f: inst.vuelos) feromona.putIfAbsent(claveVuelo(f), FEROMONA_INICIAL);
+
+        Solucion mejorGlobal = null;
+        double mejorValorObj = -1e18;
+        int iterSinMejora = 0;
+
+        for (int it=0; it<MAX_ITERACIONES; it++){
+            List<Solucion> soluciones = new ArrayList<>(NUM_HORMIGAS);
+            for (int k=0; k<NUM_HORMIGAS; k++) soluciones.add(construirSolucionGlobal(inst));
+            soluciones.sort(Comparator.comparingDouble(s->-s.valorObjetivo));
+            Solucion mejorIteracion = soluciones.get(0);
+
+            // evaporación global
+            for (String k: feromona.keySet()){
+                double nv = (1.0 - TASA_EVAPORACION_GLOBAL) * feromona.get(k);
+                feromona.put(k, limitarEntre(nv, FEROMONA_MIN, FEROMONA_MAX));
+            }
+
+            // refuerzo (ponderado por cantidad de producto)
+            aplicarRefuerzoFeromonas(mejorIteracion, INTENSIDAD_REFUERZO * FRACCION_REFUERZO_ELITE, inst);
+            if (mejorGlobal != null) aplicarRefuerzoFeromonas(mejorGlobal, INTENSIDAD_REFUERZO, inst);
+
+            if (mejorGlobal == null || mejorIteracion.valorObjetivo > mejorValorObj){
+                mejorGlobal = mejorIteracion; mejorValorObj = mejorIteracion.valorObjetivo; iterSinMejora = 0;
+            } else iterSinMejora++;
+
+            if (iterSinMejora >= PACIENCIA_ESTANCAMIENTO){
+                for (String k: feromona.keySet()) feromona.put(k, FEROMONA_INICIAL);
+                iterSinMejora = 0;
+            }
+        }
+        return mejorGlobal;
+    }
+
+    static void aplicarRefuerzoFeromonas(Solucion sol, double q, Instancia inst){
+        if (sol == null) return;
+
+        Map<Integer,Integer> cantidadPorId = new HashMap<>();
+        for (Pedido p : inst.pedidos) cantidadPorId.put(p.id, p.cantidad);
+
+        for (Map.Entry<Integer, Ruta> eR : sol.rutas.entrySet()){
+            int chunkId = eR.getKey();
+            Ruta r = eR.getValue();
+            int cantidad = cantidadPorId.getOrDefault(chunkId, 1);
+            double bonusBase = r.aTiempo ? q : q * 0.1;
+            double bonus = bonusBase * Math.max(1, cantidad); // ponderar por producto
+
+            for (Segmento s: r.segmentos){
+                String kk = claveVuelo(s.vuelo);
+                double nv = feromona.getOrDefault(kk, FEROMONA_INICIAL) + bonus;
+                feromona.put(kk, limitarEntre(nv, FEROMONA_MIN, FEROMONA_MAX));
+            }
+        }
+    }
+
+    static double limitarEntre(double v, double lo, double hi){ return Math.max(lo, Math.min(hi, v)); }
+
+    // =========================
+    // CARGA DE INSUMOS
+    // =========================
+    static Map<String,Aeropuerto> cargarTablaAeropuertos(Path path) throws IOException {
         List<String> lineas = Files.readAllLines(path, Charset.forName("UTF-16"));
         Map<String,Aeropuerto> map = new HashMap<>();
         String continente = "SA";
-
         Pattern fila = Pattern.compile("^\\s*\\d+\\s+([A-Z0-9]{3,4})\\s+(.+?)\\s+(.+?)\\s+[A-Za-z]{4}\\s+([+-]?\\d+)\\s+(\\d+).*$");
 
         for (String ln : lineas) {
-            String l = ln.trim();
-            if (l.isEmpty()) continue;
-
-            if (l.contains("America del Sur")) { continente = "SA"; continue; }
-            if (l.contains("Europa"))          { continente = "EU"; continue; }
-            if (l.contains("Asia"))            { continente = "AS"; continue; }
+            String l = ln.trim(); if (l.isEmpty()) continue;
+            String ll = l.toLowerCase(Locale.ROOT);
+            if (ll.contains("américa del sur") || ll.contains("america del sur")) { continente = "SA"; continue; }
+            if (ll.contains("europa")) { continente = "EU"; continue; }
+            if (ll.contains("asia"))   { continente = "AS"; continue; }
 
             Matcher m = fila.matcher(ln);
             if (m.matches()) {
@@ -344,8 +499,8 @@ public class MoraPackACO {
                 a.codigo = m.group(1).trim();
                 a.ciudad = m.group(2).trim().replaceAll("\\s+", " ");
                 a.pais   = m.group(3).trim().replaceAll("\\s+", " ");
-                a.gmtOffset = Integer.parseInt(m.group(4).trim());
-                a.capacidadAlmacen = Integer.parseInt(m.group(5).trim());
+                a.desfaseGMT = Integer.parseInt(m.group(4).trim());
+                a.capacidadAlmacen = 100_000_000; // muy grande para este análisis
                 a.continente = continente;
                 map.put(a.codigo, a);
             }
@@ -353,7 +508,7 @@ public class MoraPackACO {
         return map;
     }
 
-    static List<Vuelo> cargarVuelos(Path path, Map<String,Aeropuerto> aeropuertos, LocalDate ancla) throws IOException {
+    static List<Vuelo> cargarTablaVuelos(Path path, Map<String,Aeropuerto> aeropuertos, LocalDate ancla) throws IOException {
         List<String> lineas = Files.readAllLines(path);
         List<Vuelo> lista = new ArrayList<>();
         for (String ln: lineas){
@@ -366,41 +521,78 @@ public class MoraPackACO {
 
             Aeropuerto ao = aeropuertos.get(v.origen);
             Aeropuerto ad = aeropuertos.get(v.destino);
-            if (ao == null || ad == null) {
-                System.out.println("[WARN] Vuelo ignorado: " + v.origen + "->" + v.destino);
-                continue;
-            }
+            if (ao == null || ad == null) { continue; }
 
-            v.salidaUTC = toUTC(v.horaOrigen, ao.gmtOffset, ancla);
-            v.llegadaUTC = toUTC(v.horaDestino, ad.gmtOffset, ancla);
-            if (v.llegadaUTC < v.salidaUTC) v.llegadaUTC += 24*60;
+            v.salidaUTC = aUTC(v.horaOrigen, ao.desfaseGMT, ancla);
+            v.llegadaUTC = aUTC(v.horaDestino, ad.desfaseGMT, ancla);
+            long duracion = v.llegadaUTC - v.salidaUTC;
+            while (duracion <= 0) {
+                v.llegadaUTC += 24*60;
+                duracion = v.llegadaUTC - v.salidaUTC;
+            }
             lista.add(v);
         }
         return lista;
     }
 
-    static List<Pedido> construirGrupoPedidos(Instancia inst, LocalDate ancla, String[][] pares, int startId) {
+    // =========================
+    // CARGA DE PEDIDOS DESDE TXT (dd-hh-mm-dest-###-IdClien)
+    // =========================
+    static List<Pedido> cargarPedidosDesdeArchivo(Path path, Instancia inst, LocalDate ancla) throws IOException {
+        List<String> lineas = Files.readAllLines(path);
         List<Pedido> pedidos = new ArrayList<>();
-        int id = startId;
+        int idAuto = 1;
 
-        for (String[] par : pares) {
-            String o = par[0], d = par[1];
+        Pattern pat = Pattern.compile("^(\\d{2})-(\\d{2})-(\\d{2})-([A-Z0-9]{3,4})-(\\d{3})-(\\d{7})$");
 
-            if (!inst.aeropuertos.containsKey(o) || !inst.aeropuertos.containsKey(d)) {
-                System.out.println("[WARN] Pedido ignorado: " + o + " -> " + d);
-                continue;
+        for (String ln : lineas) {
+            String l = ln.trim();
+            if (l.isEmpty() || l.startsWith("#")) continue;
+
+            Matcher m = pat.matcher(l);
+            if (!m.matches()) { continue; }
+
+            int dd = Integer.parseInt(m.group(1));
+            int hh = Integer.parseInt(m.group(2));
+            int mm = Integer.parseInt(m.group(3));
+            String dest = m.group(4);
+            int qty = Integer.parseInt(m.group(5));
+
+            if (dd < 1 || dd > 24) { continue; }
+            if (hh < 1 || hh > 23) { continue; }
+            if (mm < 1 || mm > 59) { continue; }
+            if (qty < 1 || qty > 999) { continue; }
+
+            Aeropuerto aDest = inst.aeropuertos.get(dest);
+            if (aDest == null) { continue; }
+
+            String origen;
+            if (azar.nextDouble() < 0.3) {
+                // 30% intercontinental: elige un hub de OTRO continente
+                List<String> hubs = new ArrayList<>(CODIGOS_HUBS);
+                hubs.remove(hubParaContinente(aDest.continente));
+                origen = hubs.get(azar.nextInt(hubs.size()));
+            } else {
+                // 70% intra-continental (normal)
+                origen = hubParaContinente(aDest.continente);
             }
 
-            Pedido p = new Pedido();
-            p.id = id++;
-            p.origen = o;
-            p.destino = d;
-            p.cantidad = 80 + RNG.nextInt(100);
-            p.releaseUTC = ancla.atTime(6 + RNG.nextInt(6), RNG.nextInt(60))
-                                .toEpochSecond(ZoneOffset.UTC) / 60;
+            int offsetSecDest = aDest.desfaseGMT * 3600;
+            long liberacionUTC = ancla.atStartOfDay()
+                    .plusDays(dd)
+                    .withHour(hh).withMinute(mm)
+                    .toEpochSecond(ZoneOffset.ofTotalSeconds(offsetSecDest)) / 60;
 
-            boolean same = mismoContinente(inst.aeropuertos.get(o), inst.aeropuertos.get(d));
-            p.dueUTC = p.releaseUTC + (same ? PLAZO_INTRA.toMinutes() : PLAZO_INTER.toMinutes());
+            boolean same = mismoContinente(inst.aeropuertos.get(origen), aDest);
+            long vencimientoUTC = liberacionUTC + (same ? SLA_MISMO_CONTINENTE.toMinutes() : SLA_CONTINENTES_DISTINTOS.toMinutes());
+
+            Pedido p = new Pedido();
+            p.id = idAuto++;
+            p.origen = origen;
+            p.destino = dest;
+            p.cantidad = qty;
+            p.liberacionUTC = liberacionUTC;
+            p.vencimientoUTC = vencimientoUTC;
 
             pedidos.add(p);
         }
@@ -408,69 +600,346 @@ public class MoraPackACO {
     }
 
     // =========================
+    // SPLIT DE PEDIDOS EN SUBPEDIDOS (CHUNKS)
+    // =========================
+   static List<Pedido> dividirPedidosEnSubpedidos(List<Pedido> pedidos, Instancia inst, int siguienteIdInicio) {
+        List<Pedido> out = new ArrayList<>();
+        int nextId = siguienteIdInicio;
+
+        for (Pedido p : pedidos) {
+            // Capacidad mínima real de los vuelos que conectan origen-destino
+            int capMin = capacidadVueloMinimoDesde(inst, p.origen, p.destino);
+            int tamanioSubpedido = Math.max(1, capMin);  // nunca menor que 1
+            int K = (int) Math.ceil(p.cantidad / (double) tamanioSubpedido);
+
+            int rem = p.cantidad;
+
+            if (K <= 1) {
+                out.add(p);
+                continue;
+            }
+            for (int i = 1; i <= K; i++) {
+                Pedido c = new Pedido();
+                c.id = nextId++;
+                c.origen = p.origen;
+                c.destino = p.destino;
+                c.cantidad = Math.min(rem, tamanioSubpedido);  // ⚡ ahora en base a capMin
+                c.liberacionUTC = p.liberacionUTC;
+                c.vencimientoUTC = p.vencimientoUTC;
+                c.idPedidoOriginal = (p.idPedidoOriginal == -1 ? p.id : p.idPedidoOriginal);
+                c.indiceSubpedido = i;
+                c.totalSubpedidos = K;
+                out.add(c);
+                rem -= c.cantidad;
+            }
+        }
+        return out;
+    }
+
+
+
+    static Map<Integer, ResumenPedidoOriginal> agruparEstadisticasPorPedidoOriginal(List<Pedido> todos, Solucion sol) {
+        Map<Integer, ResumenPedidoOriginal> agg = new HashMap<>();
+        for (Pedido c : todos) {
+            int pid = (c.idPedidoOriginal == -1 ? c.id : c.idPedidoOriginal);
+            ResumenPedidoOriginal a = agg.computeIfAbsent(pid, k -> {
+                ResumenPedidoOriginal x = new ResumenPedidoOriginal();
+                x.idPedidoOriginal = pid; return x;
+            });
+            a.totalCantidad += c.cantidad;
+            a.subpedidos += 1;
+            Ruta r = sol.rutas.get(c.id);
+            if (r != null && r.aTiempo) a.subpedidosATiempo += 1;
+        }
+        for (ResumenPedidoOriginal a : agg.values()) a.pedidoCompletoATiempo = (a.subpedidosATiempo == a.subpedidos);
+        return agg;
+    }
+    // =========================
+    // PRECÁLCULO DE DISTANCIAS EN SALTOS
+    // =========================
+    static void precomputarDistanciasPorSaltos(Instancia inst){
+        int n = inst.aeropuertos.size();
+        inst.indiceAeropuerto.clear();
+        inst.indiceAAeropuerto = new String[n];
+        int idx = 0;
+        for (String code : inst.aeropuertos.keySet()){
+            inst.indiceAeropuerto.put(code, idx);
+            inst.indiceAAeropuerto[idx] = code;
+            idx++;
+        }
+        inst.distanciaSaltos = new int[n][n];
+        for (int i=0;i<n;i++) Arrays.fill(inst.distanciaSaltos[i], 1_000_000);
+
+        Map<Integer, List<Integer>> adj = new HashMap<>();
+        for (Map.Entry<String,List<Vuelo>> e : inst.vuelosPorOrigen.entrySet()){
+            Integer u = inst.indiceAeropuerto.get(e.getKey());
+            if (u==null) continue;
+            List<Integer> lst = adj.computeIfAbsent(u, k-> new ArrayList<>());
+            for (Vuelo v : e.getValue()){
+                Integer w = inst.indiceAeropuerto.get(v.destino);
+                if (w!=null) lst.add(w);
+            }
+        }
+
+        int hopNorm = 1;
+        for (int s=0;s<n;s++){
+            int[] dist = inst.distanciaSaltos[s];
+            dist[s] = 0;
+            ArrayDeque<Integer> q = new ArrayDeque<>();
+            q.add(s);
+            while(!q.isEmpty()){
+                int u = q.poll();
+                for (int v : adj.getOrDefault(u, List.of())){
+                    if (dist[v] > dist[u] + 1){
+                        dist[v] = dist[u] + 1;
+                        hopNorm = Math.max(hopNorm, dist[v]);
+                        q.add(v);
+                    }
+                }
+            }
+        }
+        inst.normalizadorSaltos = hopNorm;
+    }
+
+
+    // =========================
+    // REPORTING: PLANIFICACIÓN Y KPIs
+    // =========================
+    static class RouteStats {
+        int hops;
+        long esperaTotal;
+        long vueloTotal;
+        long slackFinal;
+        boolean onTime;
+    }
+
+    static RouteStats calcularStatsRuta(Pedido p, Ruta r){
+        RouteStats st = new RouteStats();
+        if (r == null) { st.onTime=false; st.slackFinal = Long.MIN_VALUE; return st; }
+        long t = p.liberacionUTC;
+        for (Segmento s : r.segmentos){
+            long espera = Math.max(0, s.salidaAjustadaUTC - t);
+            long vuelo = Math.max(0, s.llegadaAjustadaUTC - s.salidaAjustadaUTC);
+            st.esperaTotal += espera;
+            st.vueloTotal += vuelo;
+            st.hops++;
+            t = s.llegadaAjustadaUTC;
+        }
+        st.slackFinal = p.vencimientoUTC - r.llegadaFinalUTC;
+        st.onTime = r.aTiempo;
+        return st;
+    }
+
+    static int capacidadVueloMinimoDesde(Instancia inst, String origen, String destino) {
+        int capMin = Integer.MAX_VALUE;
+        for (Vuelo v : inst.vuelos) {
+            if (v.origen.equals(origen) && v.destino.equals(destino)) {
+                capMin = Math.min(capMin, v.capacidad);
+            }
+        }
+        if (capMin == Integer.MAX_VALUE) {
+            for (Vuelo v : inst.vuelos) {
+                if (v.origen.equals(origen)) {
+                    capMin = Math.min(capMin, v.capacidad);
+                }
+            }
+        }
+        if (capMin == Integer.MAX_VALUE) {
+            for (Vuelo v : inst.vuelos) {
+                if (v.destino.equals(destino)) {
+                    capMin = Math.min(capMin, v.capacidad);
+                }
+            }
+        }
+        if (capMin == Integer.MAX_VALUE) capMin = 150;
+
+        return capMin;
+    }
+
+
+    static void mostrarPlanificacionPorPedido(Instancia inst, Solucion sol){
+        System.out.println();
+        System.out.println("=============== REPORTE DE PLANIFICACION POR PEDIDO ===============");
+
+        // Agrupar subpedidos por pedido original
+        Map<Integer, List<Pedido>> pedidosPorOriginal = new HashMap<>();
+        for (Pedido p : inst.pedidos) {
+            int pid = (p.idPedidoOriginal == -1 ? p.id : p.idPedidoOriginal);
+            pedidosPorOriginal.computeIfAbsent(pid, k -> new ArrayList<>()).add(p);
+        }
+
+        for (Map.Entry<Integer, List<Pedido>> e : pedidosPorOriginal.entrySet()) {
+            List<Pedido> lista = e.getValue();
+            lista.sort(Comparator.comparingInt(p -> p.indiceSubpedido));
+            Pedido base = lista.get(0);
+
+            Aeropuerto apOri = inst.aeropuertos.get(base.origen);
+            Aeropuerto apDes = inst.aeropuertos.get(base.destino);
+            int totalCantidad = lista.stream().mapToInt(p -> p.cantidad).sum();
+
+            System.out.println("-------------------------------------------------------------------");
+            System.out.printf("PEDIDO %d%n", e.getKey());
+            System.out.printf("   Origen: %s   ->   Destino: %s%n", base.origen, base.destino);
+            System.out.printf("   Cantidad total: %d unidades   |   Subpedidos: %d%n", totalCantidad, lista.size());
+            System.out.printf("   Hora de liberacion: %s%n", fmtLocalDHHMM(base.liberacionUTC, apOri, inst.fechaAncla));
+            System.out.printf("   Plazo maximo de entrega: %s%n", fmtLocalDHHMM(base.vencimientoUTC, apDes, inst.fechaAncla));
+            System.out.println("-------------------------------------------------------------------");
+
+            int cumplidos = 0;
+            List<Long> holguras = new ArrayList<>();
+
+            for (Pedido p : lista) {
+                Ruta r = sol.rutas.get(p.id);
+                System.out.printf("   Subpedido %d/%d  |  Cantidad: %d%n",
+                        p.indiceSubpedido, p.totalSubpedidos, p.cantidad);
+
+                if (r == null) {
+                    System.out.println("      SIN RUTA (no se pudo cumplir restricciones, capacidad o plazo)");
+                    System.out.println("-------------------------------------------------------------------");
+                    continue;
+                }
+
+                long t = p.liberacionUTC;
+                for (int i = 0; i < r.segmentos.size(); i++) {
+                    Segmento s = r.segmentos.get(i);
+                    Aeropuerto aO = inst.aeropuertos.get(s.vuelo.origen);
+                    Aeropuerto aD = inst.aeropuertos.get(s.vuelo.destino);
+                    long espera = Math.max(0, s.salidaAjustadaUTC - t);
+                    long dur = Math.max(0, s.llegadaAjustadaUTC - s.salidaAjustadaUTC);
+                    long holguraRestante = p.vencimientoUTC - s.llegadaAjustadaUTC;
+
+                    System.out.printf("      Tramo %d: %s -> %s%n", (i+1), s.vuelo.origen, s.vuelo.destino);
+                    System.out.printf("         Sale: %s   |   Llega: %s%n",
+                            fmtLocalDHHMM(s.salidaAjustadaUTC, aO, inst.fechaAncla),
+                            fmtLocalDHHMM(s.llegadaAjustadaUTC, aD, inst.fechaAncla));
+                    System.out.printf("         Espera: %d min   |   Vuelo: %d min   |   Tiempo extra: %+d min%n",
+                            espera, dur, holguraRestante);
+
+                    t = s.llegadaAjustadaUTC;
+                }
+
+                RouteStats st = calcularStatsRuta(p, r);
+                holguras.add(st.slackFinal);
+                if (st.onTime) cumplidos++;
+            }
+
+            System.out.println("===================================================================");
+        }
+
+        System.out.println("======================= FIN DEL REPORTE DE PLANIFICACION =======================");
+    }
+
+
+
+
+    static String formatoPorcentaje(long num, long den){
+        if (den <= 0) return "0.0%";
+        return String.format(Locale.ROOT, "%.1f%%", 100.0 * num / (double)den);
+    }
+
+    // =========================
+    // REPORTE PARA EXPERIMENTACIÓN NUMÉRICA
+    // =========================
+    static void reporteExperimentacion(Instancia inst, Solucion mejor, long elapsedMs){
+        long totalPedidos = (int) inst.pedidos.stream()
+                .map(p -> (p.idPedidoOriginal == -1 ? p.id : p.idPedidoOriginal))
+                .distinct().count();
+
+        long totalSubpedidos = inst.pedidos.size();
+        long productoTotal = inst.pedidos.stream().mapToLong(p -> p.cantidad).sum();
+
+        long onTimeSub = mejor.subpedidosATiempo;
+        long productoATiempo = inst.pedidos.stream()
+                .filter(p -> mejor.rutas.get(p.id) != null && mejor.rutas.get(p.id).aTiempo)
+                .mapToLong(p -> p.cantidad).sum();
+
+        long pedidosATiempo = agruparEstadisticasPorPedidoOriginal(inst.pedidos, mejor)
+                .values().stream().filter(r -> r.pedidoCompletoATiempo).count();
+
+        // ================== REPORTE LEGIBLE ==================
+        System.out.println();
+        System.out.println("══════════════════════════════════════════════════════════════════════════════════════════════");
+        System.out.println("                     REPORTE DE EXPERIMENTACIÓN NUMÉRICA");
+        System.out.println("══════════════════════════════════════════════════════════════════════════════════════════════");
+
+        // 1. Información del experimento
+        System.out.println("+ Información del experimento");
+        System.out.printf("   Algoritmo: ACO (Colonia de Hormigas)%n");
+        System.out.printf("   Iteraciones: %d | Hormigas: %d%n", MAX_ITERACIONES, NUM_HORMIGAS);
+        System.out.printf("   Parámetros:%n");
+        System.out.printf("      Peso feromona (alpha): %.2f%n", PESO_FEROMONA);
+        System.out.printf("      Peso heurística (beta): %.2f%n", PESO_HEURISTICA);
+        System.out.printf("      Tasa evaporación global (rho): %.2f%n", TASA_EVAPORACION_GLOBAL);
+        System.out.printf("      Tasa actualización local (phi): %.2f%n", TASA_ACTUALIZACION_LOCAL);
+        System.out.printf("      Probabilidad de explotación (q0): %.2f%n", PROBABILIDAD_EXPLOTAR);
+        System.out.printf("   Pedidos=%d | Subpedidos=%d | Producto total=%d%n",
+                totalPedidos, totalSubpedidos, productoTotal);
+
+        System.out.println("----------------------------------------------------------------------------------------------");
+
+        // 2. Métricas principales
+        System.out.println("+ Métricas principales");
+        System.out.printf("   - Fitness (calidad global de la solución): %.2f%n", mejor.valorObjetivo);
+        System.out.printf("   - Tiempo de ejecución: %d ms%n", elapsedMs);
+        System.out.printf("   - %% de entregas a tiempo (subpedidos): %s%n",
+                formatoPorcentaje(onTimeSub, totalSubpedidos));
+        System.out.printf("   - %% de entregas a tiempo (productos): %s%n",
+                formatoPorcentaje(productoATiempo, productoTotal));
+        System.out.printf("   - %% de pedidos completos a tiempo: %s%n",
+                formatoPorcentaje(pedidosATiempo, totalPedidos));
+
+        System.out.println("══════════════════════════════════════════════════════════════════════════════════════════════");
+    }
+
+
+    // =========================
     // MAIN
     // =========================
     public static void main(String[] args) throws Exception {
-        Path aTxt = Paths.get("c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt");
-        Path vTxt = Paths.get("c.1inf54.25.2.planes_vuelo.v4.20250818.txt");
+        // Archivos de insumo
+        Path archivoAeropuertos = Paths.get("c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt");
+        Path archivoVuelos = Paths.get("c.1inf54.25.2.planes_vuelo.v4.20250818.txt");
+
+        // 1er argumento: ruta del TXT de pedidos
+        Path archivoPedidos = Paths.get(args.length >= 1 ? args[0] : "pedidos.txt");
+        // 2do argumento (opcional): semilla RNG
+        Long seedUsada = null;
+        if (args.length >= 2) {
+            seedUsada = Long.parseLong(args[1]);
+            azar.setSeed(seedUsada);
+        }
+
         LocalDate ancla = LocalDate.now();
-
         Instancia inst = new Instancia();
-        inst.aeropuertos = cargarAeropuertos(aTxt);
-        inst.vuelos = cargarVuelos(vTxt, inst.aeropuertos, ancla);
+        inst.fechaAncla = ancla;
+        inst.diasMes = ancla.lengthOfMonth();
 
+        // Carga aeropuertos y vuelos
+        inst.aeropuertos = cargarTablaAeropuertos(archivoAeropuertos);
+        inst.vuelos = cargarTablaVuelos(archivoVuelos, inst.aeropuertos, ancla);
+
+        // Grafo ordenado por salida
         for (Vuelo f : inst.vuelos)
-            inst.grafo.computeIfAbsent(f.origen, k -> new ArrayList<>()).add(f);
-        for (List<Vuelo> lst : inst.grafo.values())
+            inst.vuelosPorOrigen.computeIfAbsent(f.origen, k -> new ArrayList<>()).add(f);
+        for (List<Vuelo> lst : inst.vuelosPorOrigen.values())
             lst.sort(Comparator.comparingLong(v -> v.salidaUTC));
 
-        String[][] paresGrupo = {
-            {"SGAS", "LOWW"},  // Asunción (SA) -> Viena (EU)
-            {"SABE", "EHAM"},  // Buenos Aires (SA) -> Ámsterdam (EU)
-            {"SKBO", "OMDB"},  // Bogotá (SA) -> Dubái (AS)
-            {"SCEL", "LATI"},  // Santiago (SA) -> Tirana (EU)
-            {"SEQM", "UBBB"},  // Quito (SA) -> Bakú (AS)
-            {"SBBR", "EHAM"},   // Brasilia (SA) -> Ámsterdam (EU)
-            {"SEQM", "SPIM"},  // Quito (SA) -> Lima (SA)
-            {"SABE", "SGAS"},  // Buenos Aires (SA) -> Asunción (SA)
-            {"EHAM", "LOWW"},  // Ámsterdam (EU) -> Viena (EU)
-            {"OMDB", "UBBB"}   // Dubái (AS) -> Bakú (AS)
-        };
+        // Fallback de progreso por hops
+        precomputarDistanciasPorSaltos(inst);
 
-        List<Pedido> pedidosGrupo = construirGrupoPedidos(inst, ancla, paresGrupo,1);
-        inst.pedidos = pedidosGrupo; 
-        Solucion best = ACO_MAIN(inst);
+        // Cargar pedidos desde TXT
+        List<Pedido> pedidosOriginales = cargarPedidosDesdeArchivo(archivoPedidos, inst, ancla);
 
-        // === Reporte ===
-        System.out.println("=== Insumos cargados ===");
-        System.out.println("Aeropuertos: " + inst.aeropuertos.size());
-        System.out.println("Vuelos: " + inst.vuelos.size());
+        // Split a subpedidos
+        inst.pedidos = dividirPedidosEnSubpedidos(pedidosOriginales, inst, 100000);
 
-        System.out.println();
-        System.out.println("=== RESULTADO ACO ===");
-        System.out.println("on_time=" + best.onTime +
-                        " late=" + best.late +
-                        " viol=" + best.violCap +
-                        " obj=" + best.obj);
+        long t0 = System.currentTimeMillis();
+        Solucion mejor = ejecutarACO(inst);
+        long t1 = System.currentTimeMillis();
+        long elapsedMs = (t1 - t0);
 
-        for (Pedido o : inst.pedidos) {
-            Ruta r = best.rutas.get(o.id);
-            if (r == null) {
-                System.out.println("Pedido " + o.id + " (" + o.origen + "->" + o.destino +
-                                ", q=" + o.cantidad + "): [sin ruta]");
-            } else {
-                StringBuilder sb = new StringBuilder("[ruta ");
-                for (int i=0; i<r.vuelos.size(); i++) {
-                    Vuelo v = r.vuelos.get(i);
-                    sb.append(v.origen).append("->").append(v.destino);
-                    if (i < r.vuelos.size()-1) sb.append("||");
-                }
-                sb.append("] ");
-                sb.append(r.onTime ? "(on-time)" : "(late)");
-                System.out.println("Pedido " + o.id + " (" + o.origen + "->" + o.destino +
-                                ", q=" + o.cantidad + "): " + sb.toString());
-            }
-        }
+        // ====== NUEVOS REPORTES EN TERMINAL ======
+        mostrarPlanificacionPorPedido(inst, mejor);
+        reporteExperimentacion(inst, mejor, elapsedMs);
     }
-
 }
