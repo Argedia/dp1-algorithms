@@ -224,6 +224,89 @@ public class MoraPackACO {
         return ruta;
     }
 
+
+    static Ruta construirRutaSinOrigen(Pedido o, Instancia inst, Map<String,Integer> usadoGlobal){
+    String destino = o.destino;
+    long tNow = o.releaseUTC;
+
+    // Elegir un aeropuerto inicial aleatorio
+    List<String> nodos = new ArrayList<>(inst.grafo.keySet());
+    if (nodos.isEmpty()) return null;
+    String cur = nodos.get(RNG.nextInt(nodos.size()));
+
+    Map<String,Integer> usadoLocal = new HashMap<>();
+    Map<String,Integer> visitas = new HashMap<>();
+    visitas.put(cur, 1);
+
+    Ruta ruta = new Ruta();
+    int hops = 0;
+
+    while (!cur.equals(destino) && hops < MAX_ESCALAS) {
+        List<Vuelo> cand = inst.grafo.getOrDefault(cur, List.of());
+        if (cand.isEmpty()) return null;
+
+        List<Vuelo> elegibles = new ArrayList<>();
+        List<Double> pesos = new ArrayList<>();
+        double sum = 0.0;
+
+        for (Vuelo f: cand){
+            int visDest = visitas.getOrDefault(f.destino,0);
+            if (visDest >= MAX_VISITAS_AEROPUERTO) continue;
+
+            long[] times = new long[2];
+            double eta = heuristic(o, cur, tNow, f, usadoLocal, usadoGlobal, inst, times);
+            if (eta <= 0) continue;
+
+            String k = key(f);
+            double t = tau.getOrDefault(k, TAU0);
+            double val = Math.pow(t, ALPHA) * Math.pow(eta, BETA);
+
+            elegibles.add(f);
+            pesos.add(val);
+            sum += val;
+        }
+
+        if (elegibles.isEmpty()) return null;
+
+        double r = RNG.nextDouble() * sum;
+        Vuelo elegido = null;
+        long salidaAdj = 0, llegadaAdj = 0;
+
+        for (int i=0; i<elegibles.size(); i++){
+            r -= pesos.get(i);
+            if (r <= 0 || i == elegibles.size()-1){
+                elegido = elegibles.get(i);
+                salidaAdj = elegido.salidaUTC;
+                llegadaAdj = elegido.llegadaUTC;
+                while (salidaAdj < tNow + MIN_CONEXION) { 
+                    salidaAdj += 1440; 
+                    llegadaAdj += 1440; 
+                }
+                break;
+            }
+        }
+
+        if (elegido == null) return null;
+
+        String k = key(elegido);
+        double tVal = tau.getOrDefault(k, TAU0);
+        tau.put(k, (1.0 - PHI) * tVal + PHI * TAU0);
+
+        ruta.vuelos.add(elegido);
+        usadoLocal.put(k, usadoLocal.getOrDefault(k,0)+o.cantidad);
+        cur = elegido.destino;
+        tNow = llegadaAdj;
+        visitas.put(cur, visitas.getOrDefault(cur,0)+1);
+        hops++;
+    }
+
+    if (!cur.equals(destino)) return null;
+
+    ruta.llegadaFinalUTC = tNow;
+    return ruta;
+    }
+
+
     // =========================
     // CONSTRUCCIÓN SOLUCIÓN
     // =========================
