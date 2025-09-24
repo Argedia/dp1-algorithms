@@ -11,7 +11,6 @@ import java.io.*;
 import java.nio.file.*;
 import java.nio.charset.*;
 import java.util.*;
-import java.util.stream.*;
 
 public class MoraPackGAMensual {
 
@@ -22,8 +21,8 @@ public class MoraPackGAMensual {
     static final int PICKUP_WINDOW_MIN = 120;         // 2 horas de recojo
 
     // ===================== Parámetros GA =============================
-    static final int POP_SIZE = 40;
-    static final int MAX_GEN  = 100;
+    static final int POP_SIZE = 50;
+    static final int MAX_GEN  = 200;
     static final double PCROSS = 0.8;
     static final double PMUT   = 0.05;
     static final int ELITE_K   = 4;
@@ -47,7 +46,7 @@ public class MoraPackGAMensual {
     static final int SLOT_MIN = 60; // 60 minutos
 
     // Recorte opcional de branching
-    static final int TOPK_CANDIDATES = 1_000_000;
+    static final int TOPK_CANDIDATES = 2000;
 
     // ===================== Modelos de datos ==========================
     enum Continent { SOUTH_AMERICA, EUROPE, ASIA, OTHER }
@@ -95,12 +94,10 @@ public class MoraPackGAMensual {
         String dest;
         int qty;
         int releaseMinUTC;
-        // NEW: datos del nuevo formato
+        //datos del nuevo formato
         int dayOfMonth;          // 1..31
         String clientId;         // 7 dígitos zero-padded
-        public Order(String dest, int qty, int releaseMinUTC) {
-            this.dest = dest; this.qty = qty; this.releaseMinUTC = releaseMinUTC;
-        }
+
         public Order(String dest, int qty, int releaseMinUTC, int dayOfMonth, String clientId) {
             this.dest = dest; this.qty = qty; this.releaseMinUTC = releaseMinUTC;
             this.dayOfMonth = dayOfMonth; this.clientId = clientId;
@@ -188,8 +185,8 @@ public class MoraPackGAMensual {
                 if (gmt==null && t.matches("[+-]?\\d{1,2}")) {
                     int v = Integer.parseInt(t); if (v>=-12 && v<=14) { gmt=v; continue; }
                 }
-                if (cap==null && t.matches("\\d{2,5}")) {
-                    int v = Integer.parseInt(t); if (v>=100 && v<=10000) { cap=v; continue; }
+                if (cap==null && t.matches("\\d{2,9}")) {
+                    int v = Integer.parseInt(t); if (v>=100 && v<=100000000) { cap=v; continue; }
                 }
                 if (lat==null && t.matches("[+-]?\\d+(\\.\\d+)?")) { lat = Double.parseDouble(t); continue; }
                 if (lon==null && t.matches("[+-]?\\d+(\\.\\d+)?")) { lon = Double.parseDouble(t); continue; }
@@ -246,19 +243,20 @@ public class MoraPackGAMensual {
 
     // ===================== Precomputación de tiempos/capacidades =====
     static class Precomp {
-        int[][] depUTC;   // [fi][d]
-        int[][] arrUTC;   // [fi][d]
-        int[][] capUsedArr; // [fi][d]
-        Map<Flight,Integer> flightIndex = new HashMap<>();
-        Map<String,int[]> outIdxByAirport = new HashMap<>();
+        final int[][] depUTC;             // [fi][d]
+        final int[][] arrUTC;             // [fi][d]
+        final Map<Flight,Integer> flightIndex = new HashMap<>();
+        final Map<String,int[]> outIdxByAirport = new HashMap<>();
+
+        Precomp(int numFlights, int horizonDays){
+            depUTC = new int[numFlights][horizonDays];
+            arrUTC = new int[numFlights][horizonDays];
+        }
     }
 
     static Precomp precompute(World W, int horizonDays){
-        Precomp P = new Precomp();
         int n = W.flights.size();
-        P.depUTC = new int[n][horizonDays];
-        P.arrUTC = new int[n][horizonDays];
-        P.capUsedArr = new int[n][horizonDays];
+        Precomp P = new Precomp(n, horizonDays);
 
         for (int i=0;i<n;i++) P.flightIndex.put(W.flights.get(i), i);
 
@@ -346,9 +344,9 @@ public class MoraPackGAMensual {
         // NEW: pesos para “más directo”
         double wDirect = 50.0;   // gran bonus si dest == target
         double wTwoHop = 5.0;    // bonus si hay vuelo directo desde next -> target
-        Map<String,Double> distToDestByAp; // cache distancias
+        Map<String,Double> distToDestByAp = Collections.emptyMap();
         // NEW: aeropuertos con vuelo directo hacia el destino
-        Set<String> hasDirectToTarget = new HashSet<>();
+        Set<String> hasDirectToTarget = Collections.emptySet();
     }
 
     static FlightCandidate selectByPriority(List<FlightCandidate> cand, SelectContext ctx){
@@ -396,7 +394,9 @@ public class MoraPackGAMensual {
         Random rnd;
         int numSlots;
         List<FlightCandidate> candBuf = new ArrayList<>(64);
-        Map<String,Double> distToDestByAp = new HashMap<>();
+        int[][] capUsed;
+        Map<String, Map<String,Double>> distCache = new HashMap<>();
+        Map<String, Set<String>> directCache = new HashMap<>();
     }
 
     static String fkey(Flight f, int d){ return f.orig+">"+f.dest+"@D"+d+"#"+f.depLocalMin; }
@@ -420,20 +420,38 @@ public class MoraPackGAMensual {
         Airport aOrig = dc.W.airports.get(current);
         if (aOrig==null) return 0;
 
+        final int minDeparture = tNowUTC + MIN_TURN_MIN;
+
         for (int k=0; k<outIdx.length; k++){
             int fi = outIdx[k];
             Flight f = dc.W.flights.get(fi);
             Airport aDest = dc.W.airports.get(f.dest);
             if (aDest==null) continue;
 
-            for (int d=0; d<dc.horizonDays; d++){
-                int depUTC = dc.P.depUTC[fi][d];
-                int arrUTC = dc.P.arrUTC[fi][d];
+            int[] depPerDay = dc.P.depUTC[fi];
+            int[] arrPerDay = dc.P.arrUTC[fi];
 
-                if (depUTC < tNowUTC + MIN_TURN_MIN) continue;
+            int baseDep = depPerDay[0];
+            if (baseDep > dueLimit) continue;
+
+            int dStart;
+            if (minDeparture <= baseDep) dStart = 0;
+            else {
+                int delta = minDeparture - baseDep;
+                dStart = delta / 1440;
+                if (delta % 1440 != 0) dStart++;
+            }
+            if (dStart < 0) dStart = 0;
+
+            for (int d=dStart; d<dc.horizonDays; d++){
+                int depUTC = depPerDay[d];
+                if (depUTC < minDeparture) continue;
+                if (depUTC > dueLimit) break;
+
+                int arrUTC = arrPerDay[d];
                 if (arrUTC > dueLimit) continue;
 
-                int used = dc.P.capUsedArr[fi][d];
+                int used = dc.capUsed[fi][d];
                 int avail = f.capacity - used;
                 if (avail <= 0) continue;
                 if (avail < neededQty) continue;
@@ -451,6 +469,35 @@ public class MoraPackGAMensual {
         return dc.candBuf.size();
     }
 
+    static Map<String,Double> distancesToDest(DecodeContext dc, String dest){
+        return dc.distCache.computeIfAbsent(dest, key -> {
+            Map<String,Double> map = new HashMap<>(dc.W.airports.size());
+            Airport target = dc.W.airports.get(dest);
+            if (target != null){
+                for (Airport a : dc.W.airports.values()){
+                    double d = haversineKm(a.lat, a.lon, target.lat, target.lon);
+                    map.put(a.code, d);
+                }
+            }
+            return map;
+        });
+    }
+
+    static Set<String> directOriginsToDest(DecodeContext dc, String dest){
+        return dc.directCache.computeIfAbsent(dest, key -> {
+            Set<String> origins = new HashSet<>();
+            for (Map.Entry<String,List<Flight>> e : dc.W.outByAirport.entrySet()){
+                for (Flight f : e.getValue()){
+                    if (f.dest.equals(dest)){
+                        origins.add(e.getKey());
+                        break;
+                    }
+                }
+            }
+            return origins;
+        });
+    }
+
     // Construye UNA subruta completa desde un hub hasta el destino
     static SubRoute buildSubrouteFromHub(DecodeContext dc, Order o, String hub, int dueLimit, int blockQty){
         String current = hub;
@@ -462,27 +509,8 @@ public class MoraPackGAMensual {
 
         SelectContext sctx = new SelectContext();
         sctx.W = dc.W; sctx.P = dc.P; sctx.chrom = dc.chrom; sctx.destTarget = o.dest;
-        sctx.distToDestByAp = dc.distToDestByAp;
-
-        // NEW: precalcular distancias y “dos saltos”
-        if (sctx.distToDestByAp.isEmpty()){
-            var ad = dc.W.airports.get(o.dest);
-            if (ad!=null){
-                for (Airport a: dc.W.airports.values()){
-                    double d = haversineKm(a.lat, a.lon, ad.lat, ad.lon);
-                    sctx.distToDestByAp.put(a.code, d);
-                }
-            }
-        }
-        // NEW: construir set de aeropuertos con vuelo directo hacia el destino
-        for (var e: dc.W.outByAirport.entrySet()){
-            String ap = e.getKey();
-            boolean has = false;
-            for (Flight f: e.getValue()){
-                if (f.dest.equals(o.dest)) { has=true; break; }
-            }
-            if (has) sctx.hasDirectToTarget.add(ap);
-        }
+        sctx.distToDestByAp = distancesToDest(dc, o.dest);
+        sctx.hasDirectToTarget = directOriginsToDest(dc, o.dest);
 
         int expansions = 0, maxExp = 2000;
         boolean firstLeg = true;
@@ -523,8 +551,8 @@ public class MoraPackGAMensual {
             }
 
             Flight chF = dc.W.flights.get(chosen.fi);
-            int prev = dc.P.capUsedArr[chosen.fi][chosen.dayIndex];
-            dc.P.capUsedArr[chosen.fi][chosen.dayIndex] = prev + sr.qty;
+            int prev = dc.capUsed[chosen.fi][chosen.dayIndex];
+            dc.capUsed[chosen.fi][chosen.dayIndex] = prev + sr.qty;
 
             String k = fkey(chF, chosen.dayIndex);
             int usedMap = dc.capUsedMap.getOrDefault(k,0);
@@ -561,18 +589,28 @@ public class MoraPackGAMensual {
     }
 
     static Solution decode(World W, List<Order> orders, Chromosome chrom, int horizonDays, long seed){
+        Precomp precomputed = precompute(W, horizonDays);
+        List<Order> ordSorted = new ArrayList<>(orders);
+        ordSorted.sort(Comparator.comparingInt(o->o.releaseMinUTC));
+        return decodeSorted(W, ordSorted, chrom, horizonDays, seed, precomputed);
+    }
+
+    static Solution decode(World W, List<Order> orders, Chromosome chrom, int horizonDays, long seed, Precomp precomputed){
+        List<Order> ordSorted = new ArrayList<>(orders);
+        ordSorted.sort(Comparator.comparingInt(o->o.releaseMinUTC));
+        return decodeSorted(W, ordSorted, chrom, horizonDays, seed, precomputed);
+    }
+
+    static Solution decodeSorted(World W, List<Order> ordSorted, Chromosome chrom, int horizonDays, long seed, Precomp precomputed){
         Solution sol = new Solution();
         sol.capUsed = new HashMap<>();
         StockTracker stock = new StockTracker(W, horizonDays);
-        Precomp P = precompute(W, horizonDays);
-
-        // ordenar pedidos por release
-        List<Order> ordSorted = new ArrayList<>(orders);
-        ordSorted.sort(Comparator.comparingInt(o->o.releaseMinUTC));
+        Precomp P = precomputed;
 
         DecodeContext dc = new DecodeContext();
         dc.W=W; dc.horizonDays=horizonDays; dc.capUsedMap=sol.capUsed; dc.P=P; dc.stock=stock; dc.chrom=chrom; dc.rnd=new Random(seed);
         dc.numSlots = (horizonDays*1440)/SLOT_MIN + 5;
+        dc.capUsed = new int[W.flights.size()][horizonDays];
 
         int onTime=0, late=0, viol=0; long slackSum=0; int slackCnt=0;
 
@@ -674,8 +712,8 @@ public class MoraPackGAMensual {
     }
 
     // ===================== GA Core ==================================
-    static double fitness(World W, List<Order> orders, Chromosome c, int horizonDays){
-        return decode(W, orders, c, horizonDays, 12345L).objective;
+    static double fitness(World W, List<Order> ordersSorted, Chromosome c, int horizonDays, Precomp precomputed){
+        return decodeSorted(W, ordersSorted, c, horizonDays, 12345L, precomputed).objective;
     }
 
     static Chromosome crossover(Chromosome a, Chromosome b, Random rnd){
@@ -705,13 +743,18 @@ public class MoraPackGAMensual {
         List<Chromosome> pop = new ArrayList<>(POP_SIZE);
         for (int i=0;i<POP_SIZE;i++) pop.add(randomChromosome(W.flights.size(), rnd));
 
+        List<Order> ordersSortedMutable = new ArrayList<>(orders);
+        ordersSortedMutable.sort(Comparator.comparingInt(o->o.releaseMinUTC));
+        List<Order> ordersSorted = Collections.unmodifiableList(ordersSortedMutable);
+
+        Precomp precomputed = precompute(W, horizonDays);
         Chromosome best=null; double bestFit=-1e18; int stall=0;
 
         for (int gen=1; gen<=MAX_GEN; gen++){
             List<Scored> scored = new ArrayList<>(POP_SIZE);
             for (int i=0;i<pop.size();i++){
                 Chromosome c = pop.get(i);
-                scored.add(new Scored(c, fitness(W, orders, c, horizonDays)));
+                scored.add(new Scored(c, fitness(W, ordersSorted, c, horizonDays, precomputed)));
             }
 
             scored.sort((a,b)->Double.compare(b.fit, a.fit));
@@ -735,25 +778,10 @@ public class MoraPackGAMensual {
 
             if (stall>=NO_IMPROV_LIMIT) break;
         }
-        return decode(W, orders, best, horizonDays, seed);
+        return decodeSorted(W, ordersSorted, best, horizonDays, seed, precomputed);
     }
 
     // ===================== Carga de órdenes ==========================
-    // OLD (compat): DEST-QTY-RELHH:MM
-    static List<Order> loadOrdersLegacy(Path file, World W) throws IOException {
-        List<Order> L = new ArrayList<>();
-        for (String s: readAllLinesAuto(file)){
-            String line = s.trim(); if (line.isEmpty()) continue;
-            String[] p = line.split("-");
-            if (p.length<3) continue;
-            String dest = p[0].trim();
-            if (!W.airports.containsKey(dest)) continue;
-            int qty = Integer.parseInt(p[1].trim());
-            int rel = parseHHMM(p[2].trim());
-            L.add(new Order(dest, qty, rel));
-        }
-        return L;
-    }
 
     // NEW: dd-hh-mm-dest-###-IdClien   (UTC)
     static List<Order> loadOrdersMonthly(Path file, World W) throws IOException {
@@ -792,15 +820,15 @@ public class MoraPackGAMensual {
                 // ignora línea mal formada
             }
         }
-        // IMPORTANTE: tu horizonte debe cubrir los días usados.
+        // IMPORTANTE: el horizonte debe cubrir los días usados.
         return L;
     }
 
     // ===================== Main (CLI) ================================
     public static void main(String[] args) throws Exception {
-        Path airportsFile = Paths.get("src/main/java/com/twoalg/common/aeropuertos.txt");
+        Path airportsFile = Paths.get("src/main/java/com/twoalg/common/aeropuertos_exp.txt");
         Path flightsFile  = Paths.get("src/main/java/com/twoalg/common/planes_vuelos.txt");
-        Path ordersFile   = Paths.get("src/main/java/com/twoalg/common/ordenes2.txt"); // mensual
+        Path ordersFile   = Paths.get("src/main/java/com/twoalg/common/ordenes_dia20.txt"); // mensual
 
         World W = new World();
         loadAirports(airportsFile, W);
@@ -810,8 +838,8 @@ public class MoraPackGAMensual {
         List<Order> orders = loadOrdersMonthly(ordersFile, W);
         // Si quieres usar el formato antiguo, usa: loadOrdersLegacy(ordersFile, W);
 
-        // OJO: horizonDays debe ser suficientemente grande para dd usados (p.ej. 7 días o 31).
-        int horizonDays = 4; // ajusta según tu dataset mensual
+        // NOTA: horizonDays debe ser suficientemente grande para dd usados (ej. 7 días o 31).
+        int horizonDays = 31; // 31 por ser un dataset de 1 mes
         long seed = 20250917L;
 
         Solution best = runGA(W, orders, horizonDays, seed);
