@@ -226,84 +226,88 @@ public class MoraPackACO {
 
 
     static Ruta construirRutaSinOrigen(Pedido o, Instancia inst, Map<String,Integer> usadoGlobal){
-    String destino = o.destino;
-    long tNow = o.releaseUTC;
+        String destino = o.destino;
+        long tNow = o.releaseUTC;
 
-    // Elegir un aeropuerto inicial aleatorio
-    List<String> nodos = new ArrayList<>(inst.grafo.keySet());
-    if (nodos.isEmpty()) return null;
-    String cur = nodos.get(RNG.nextInt(nodos.size()));
+        // Origen restringido a los almacenes principales
+        List<String> almacenes = Arrays.asList("SPIM", "EBCI", "UBBB");
+        List<String> posibles = almacenes.stream()
+            .filter(inst.grafo::containsKey)
+            .toList();
 
-    Map<String,Integer> usadoLocal = new HashMap<>();
-    Map<String,Integer> visitas = new HashMap<>();
-    visitas.put(cur, 1);
+        if (posibles.isEmpty()) return null;
+        String cur = posibles.get(RNG.nextInt(posibles.size()));
 
-    Ruta ruta = new Ruta();
-    int hops = 0;
+        Map<String,Integer> usadoLocal = new HashMap<>();
+        Map<String,Integer> visitas = new HashMap<>();
+        visitas.put(cur, 1);
 
-    while (!cur.equals(destino) && hops < MAX_ESCALAS) {
-        List<Vuelo> cand = inst.grafo.getOrDefault(cur, List.of());
-        if (cand.isEmpty()) return null;
+        Ruta ruta = new Ruta();
+        int hops = 0;
 
-        List<Vuelo> elegibles = new ArrayList<>();
-        List<Double> pesos = new ArrayList<>();
-        double sum = 0.0;
+        while (!cur.equals(destino) && hops < MAX_ESCALAS) {
+            List<Vuelo> cand = inst.grafo.getOrDefault(cur, List.of());
+            if (cand.isEmpty()) return null;
 
-        for (Vuelo f: cand){
-            int visDest = visitas.getOrDefault(f.destino,0);
-            if (visDest >= MAX_VISITAS_AEROPUERTO) continue;
+            List<Vuelo> elegibles = new ArrayList<>();
+            List<Double> pesos = new ArrayList<>();
+            double sum = 0.0;
 
-            long[] times = new long[2];
-            double eta = heuristic(o, cur, tNow, f, usadoLocal, usadoGlobal, inst, times);
-            if (eta <= 0) continue;
+            for (Vuelo f: cand){
+                int visDest = visitas.getOrDefault(f.destino,0);
+                if (visDest >= MAX_VISITAS_AEROPUERTO) continue;
 
-            String k = key(f);
-            double t = tau.getOrDefault(k, TAU0);
-            double val = Math.pow(t, ALPHA) * Math.pow(eta, BETA);
+                long[] times = new long[2];
+                double eta = heuristic(o, cur, tNow, f, usadoLocal, usadoGlobal, inst, times);
+                if (eta <= 0) continue;
 
-            elegibles.add(f);
-            pesos.add(val);
-            sum += val;
-        }
+                String k = key(f);
+                double t = tau.getOrDefault(k, TAU0);
+                double val = Math.pow(t, ALPHA) * Math.pow(eta, BETA);
 
-        if (elegibles.isEmpty()) return null;
-
-        double r = RNG.nextDouble() * sum;
-        Vuelo elegido = null;
-        long salidaAdj = 0, llegadaAdj = 0;
-
-        for (int i=0; i<elegibles.size(); i++){
-            r -= pesos.get(i);
-            if (r <= 0 || i == elegibles.size()-1){
-                elegido = elegibles.get(i);
-                salidaAdj = elegido.salidaUTC;
-                llegadaAdj = elegido.llegadaUTC;
-                while (salidaAdj < tNow + MIN_CONEXION) { 
-                    salidaAdj += 1440; 
-                    llegadaAdj += 1440; 
-                }
-                break;
+                elegibles.add(f);
+                pesos.add(val);
+                sum += val;
             }
+
+            if (elegibles.isEmpty()) return null;
+
+            double r = RNG.nextDouble() * sum;
+            Vuelo elegido = null;
+            long salidaAdj = 0, llegadaAdj = 0;
+
+            for (int i=0; i<elegibles.size(); i++){
+                r -= pesos.get(i);
+                if (r <= 0 || i == elegibles.size()-1){
+                    elegido = elegibles.get(i);
+                    salidaAdj = elegido.salidaUTC;
+                    llegadaAdj = elegido.llegadaUTC;
+                    while (salidaAdj < tNow + MIN_CONEXION) { 
+                        salidaAdj += 1440; 
+                        llegadaAdj += 1440; 
+                    }
+                    break;
+                }
+            }
+
+            if (elegido == null) return null;
+
+            String k = key(elegido);
+            double tVal = tau.getOrDefault(k, TAU0);
+            tau.put(k, (1.0 - PHI) * tVal + PHI * TAU0);
+
+            ruta.vuelos.add(elegido);
+            usadoLocal.put(k, usadoLocal.getOrDefault(k,0)+o.cantidad);
+            cur = elegido.destino;
+            tNow = llegadaAdj;
+            visitas.put(cur, visitas.getOrDefault(cur,0)+1);
+            hops++;
         }
 
-        if (elegido == null) return null;
+        if (!cur.equals(destino)) return null;
 
-        String k = key(elegido);
-        double tVal = tau.getOrDefault(k, TAU0);
-        tau.put(k, (1.0 - PHI) * tVal + PHI * TAU0);
-
-        ruta.vuelos.add(elegido);
-        usadoLocal.put(k, usadoLocal.getOrDefault(k,0)+o.cantidad);
-        cur = elegido.destino;
-        tNow = llegadaAdj;
-        visitas.put(cur, visitas.getOrDefault(cur,0)+1);
-        hops++;
-    }
-
-    if (!cur.equals(destino)) return null;
-
-    ruta.llegadaFinalUTC = tNow;
-    return ruta;
+        ruta.llegadaFinalUTC = tNow;
+        return ruta;
     }
 
 
@@ -318,8 +322,8 @@ public class MoraPackACO {
         pedidos.sort(Comparator.comparingLong(p -> p.dueUTC));
 
         for (Pedido o: pedidos){
-            Ruta r = construirRuta(o, inst, usadoGlobal);
-
+            //Ruta r = construirRuta(o, inst, usadoGlobal);
+            Ruta r = construirRutaSinOrigen(o, inst, usadoGlobal);
             if (r == null) {
                 sol.late++;
                 continue;
@@ -491,11 +495,70 @@ public class MoraPackACO {
     }
 
     // =========================
+    // Leer pedidos desde archivo
+    // =========================
+
+    static List<Pedido> leerPedidosDesdeArchivo(Instancia inst, LocalDate ancla, Path filePath, int startId) throws IOException {
+        List<Pedido> pedidos = new ArrayList<>();
+        int id = startId;
+
+        List<String> lineas = Files.readAllLines(filePath);
+
+        for (String linea : lineas) {
+            if (linea.isBlank()) continue;
+
+            // Separar por "-"
+            String[] parts = linea.split("-");
+            if (parts.length < 6) {
+                System.out.println("[WARN] Línea ignorada (mal formato): " + linea);
+                continue;
+            }
+
+            int dd   = Integer.parseInt(parts[0]);
+            int hh   = Integer.parseInt(parts[1]);
+            int mm   = Integer.parseInt(parts[2]);
+            String dest = parts[3];
+            int cantidad = Integer.parseInt(parts[4]);
+            //String idCliente = parts[5];
+
+            // validar aeropuerto
+            if (!inst.aeropuertos.containsKey(dest)) {
+                System.out.println("[WARN] Pedido ignorado, destino no válido: " + dest);
+                continue;
+            }
+
+            Pedido p = new Pedido();
+            p.id = id++;
+            p.origen = null; // ya no hay origen
+            p.destino = dest;
+            p.cantidad = cantidad;
+
+            // releaseUTC: fecha ancla + dd + hh:mm
+            LocalDateTime fechaHora = ancla.withDayOfMonth(dd).atTime(hh, mm);
+            p.releaseUTC = fechaHora.toEpochSecond(ZoneOffset.UTC) / 60;
+
+            // dueUTC: calcular según si es a un almacén principal o no
+            boolean esPrincipal = dest.equals("SPIM") || dest.equals("EBBR") || dest.equals("UBBB"); 
+            // ej: SPIM = Lima, EBBR = Bruselas, UBBB = Baku
+            if (esPrincipal) {
+                p.dueUTC = p.releaseUTC + PLAZO_INTER.toMinutes(); 
+            } else {
+                p.dueUTC = p.releaseUTC + PLAZO_INTRA.toMinutes(); 
+            }
+
+            pedidos.add(p);
+        }
+
+        return pedidos;
+    }
+
+    // =========================
     // MAIN
     // =========================
     public static void main(String[] args) throws Exception {
         Path aTxt = Paths.get("c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt");
         Path vTxt = Paths.get("c.1inf54.25.2.planes_vuelo.v4.20250818.txt");
+        Path pTxt = Paths.get("ordenes2.txt"); // Nuevo archivo de pedidos
         LocalDate ancla = LocalDate.now();
 
         Instancia inst = new Instancia();
@@ -520,7 +583,8 @@ public class MoraPackACO {
             {"OMDB", "UBBB"}   // Dubái (AS) -> Bakú (AS)
         };
 
-        List<Pedido> pedidosGrupo = construirGrupoPedidos(inst, ancla, paresGrupo,1);
+        //List<Pedido> pedidosGrupo = construirGrupoPedidos(inst, ancla, paresGrupo,1);
+        List<Pedido> pedidosGrupo = leerPedidosDesdeArchivo(inst, ancla, pTxt, 1);
         inst.pedidos = pedidosGrupo; 
         Solucion best = ACO_MAIN(inst);
 
