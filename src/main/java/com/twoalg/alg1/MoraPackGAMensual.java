@@ -11,6 +11,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.nio.charset.*;
 import java.util.*;
+import java.util.regex.*;
 
 public class MoraPackGAMensual {
 
@@ -47,6 +48,15 @@ public class MoraPackGAMensual {
 
     // Recorte opcional de branching
     static final int TOPK_CANDIDATES = 2000;
+
+    private static final Pattern LATITUDE_DMS = Pattern.compile(
+        "Latitude:\\s*([0-9]{1,3})[^0-9]+([0-9]{1,2})[^0-9]+([0-9]{1,2})[^0-9]*([NS])",
+        Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern LONGITUDE_DMS = Pattern.compile(
+        "Longitude:\\s*([0-9]{1,3})[^0-9]+([0-9]{1,2})[^0-9]+([0-9]{1,2})[^0-9]*([EW])",
+        Pattern.CASE_INSENSITIVE
+    );
 
     // ===================== Modelos de datos ==========================
     enum Continent { SOUTH_AMERICA, EUROPE, ASIA, OTHER }
@@ -154,6 +164,21 @@ public class MoraPackGAMensual {
         return s;
     }
 
+    static double dmsToDecimal(int deg, int min, int sec, char hemi){
+        double val = deg + min / 60.0 + sec / 3600.0;
+        char h = Character.toUpperCase(hemi);
+        if (h == 'S' || h == 'W') val = -val;
+        return val;
+    }
+
+    static double dmsToDecimal(String deg, String min, String sec, String hemi){
+        int d = Integer.parseInt(deg);
+        int m = Integer.parseInt(min);
+        int s = Integer.parseInt(sec);
+        char h = (hemi != null && !hemi.isEmpty()) ? hemi.charAt(0) : 'N';
+        return dmsToDecimal(d, m, s, h);
+    }
+
     // ===================== Lectura robusta de archivos ===============
     static List<String> readAllLinesAuto(Path p) throws IOException {
         List<Charset> tries = List.of(StandardCharsets.UTF_8, StandardCharsets.ISO_8859_1, Charset.forName("windows-1252"));
@@ -178,10 +203,24 @@ public class MoraPackGAMensual {
         for (String s: readAllLinesAuto(file)) {
             String line = s.trim();
             if (line.isEmpty()) continue;
+
+            Double lat = null, lon = null;
+            Matcher latMatcher = LATITUDE_DMS.matcher(s);
+            if (latMatcher.find()) {
+                lat = dmsToDecimal(latMatcher.group(1), latMatcher.group(2), latMatcher.group(3), latMatcher.group(4));
+            }
+            Matcher lonMatcher = LONGITUDE_DMS.matcher(s);
+            if (lonMatcher.find()) {
+                lon = dmsToDecimal(lonMatcher.group(1), lonMatcher.group(2), lonMatcher.group(3), lonMatcher.group(4));
+            }
+
             String[] tok = line.split("\\s+|,");
-            String code = null; Integer gmt=null, cap=null; Double lat=null, lon=null;
+            String code = null; Integer gmt=null, cap=null;
             for (String t: tok) {
-                if (code==null && t.matches("[A-Z]{4}")) { code = t; continue; }
+                if (code==null) {
+                    if (t.matches("[A-Z]{4}")) { code = t; }
+                    continue;
+                }
                 if (gmt==null && t.matches("[+-]?\\d{1,2}")) {
                     int v = Integer.parseInt(t); if (v>=-12 && v<=14) { gmt=v; continue; }
                 }
@@ -193,7 +232,10 @@ public class MoraPackGAMensual {
             }
             if (code!=null && gmt!=null && cap!=null) {
                 if (lat==null) lat = 0.0; if (lon==null) lon = 0.0;
-                W.airports.put(code, new Airport(code, gmt, cap, lat, lon));
+                Airport airport = new Airport(code, gmt, cap, lat, lon);
+                W.airports.put(code, airport);
+                System.out.println("Loaded airport " + code + " GMT=" + gmt + " CAP=" + cap
+                                   + " LAT=" + lat + " LON=" + lon);
             }
         }
         for (String h: EXPORT_HUBS) if (W.airports.containsKey(h)) W.hubList.add(h);
