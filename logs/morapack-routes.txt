@@ -1,0 +1,331 @@
+Reporte de rutas MoraPack GA
+Generado: 2025-09-24 19:29:20
+
+Pedido destino EKCH qty=849 releaseUTC=05:08 delivered=849 day=20 client=6897272
+  Subruta #1 hub=EBCI qty=340 arrivalUTC=10:45
+    EBCI->EKCH D19 depUTC=08:47 arrUTC=10:45 qty=340
+  Subruta #2 hub=EBCI qty=360 arrivalUTC=15:52
+    EBCI->EKCH D19 depUTC=13:54 arrUTC=15:52 qty=360
+  Subruta #3 hub=EBCI qty=149 arrivalUTC=20:53
+    EBCI->EKCH D19 depUTC=18:55 arrUTC=20:53 qty=149
+
+Pedido destino SCEL qty=321 releaseUTC=09:08 delivered=321 day=20 client=8439146
+  Subruta #1 hub=SPIM qty=321 arrivalUTC=18:03
+    SPIM->SCEL D19 depUTC=13:59 arrUTC=18:03 qty=321
+
+Pedido destino OSDI qty=334 releaseUTC=01:14 delivered=334 day=20 client=3731644
+  Subruta #1 hub=SPIM qty=320 arrivalUTC=22:15
+    SPIM->OSDI D18 depUTC=04:04 arrUTC=22:15 qty=320
+  Subruta #2 hub=UBBB qty=14 arrivalUTC=12:49
+    UBBB->OSDI D19 depUTC=09:58 arrUTC=12:49 qty=14
+
+Pedido destino EDDI qty=504 releaseUTC=15:01 delivered=504 day=20 client=8794618
+  Subruta #1 hub=EBCI qty=155 arrivalUTC=21:11
+    EBCI->EDDI D19 depUTC=19:21 arrUTC=21:11 qty=155
+  Subruta #2 hub=EBCI qty=349 arrivalUTC=04:31
+    EBCI->EDDI D20 depUTC=02:41 arrUTC=04:31 qty=349
+
+Pedido destino EDDI qty=545 releaseUTC=02:14 delivered=545 day=20 client=0203640
+  Subruta #1 hub=UBBB qty=340 arrivalUTC=08:19
+    UBBB->EDDI D19 depUTC=03:25 arrUTC=08:19 qty=340
+  Subruta #2 hub=UBBB qty=205 arrivalUTC=13:22
+    UBBB->EDDI D19 depUTC=08:28 arrUTC=13:22 qty=205
+
+Pedido destino LKPR qty=476 releaseUTC=06:52 delivered=476 day=20 client=5619713
+  Subruta #1 hub=EBCI qty=300 arrivalUTC=13:19
+    EBCI->LKPR D19 depUTC=11:26 arrUTC=13:19 qty=300
+  Subruta #2 hub=UBBB qty=176 arrivalUTC=13:57
+    UBBB->LKPR D19 depUTC=08:11 arrUTC=13:57 qty=176
+
+Pedido destino EHAM qty=900 releaseUTC=15:14 delivered=900 day=20 client=8355408
+  Subruta #1 hub=EBCI qty=340 arrivalUTC=19:48
+    EBCI->EHAM D19 depUTC=17:32 arrUTC=19:48 qty=340
+  Subruta #2 hub=UBBB qty=360 arrivalUTC=02:11
+    UBBB->EHAM D19 depUTC=20:30 arrUTC=02:11 qty=360
+  Subruta #3 hub=EBCI qty=200 arrivalUTC=03:04
+    EBCI->EHAM D20 depUTC=01:48 arrUTC=03:04 qty=200
+
+Pedido destino SLLP qty=344 releaseUTC=01:01 delivered=344 day=20 client=0496255
+  Subruta #1 hub=SPIM qty=300 arrivalUTC=08:41
+    SPIM->SLLP D19 depUTC=05:21 arrUTC=08:41 qty=300
+  Subruta #2 hub=EBCI qty=44 arrivalUTC=15:26
+    EBCI->SLLP D19 depUTC=01:41 arrUTC=15:26 qty=44
+
+Pedido destino OERK qty=286 releaseUTC=17:30 delivered=286 day=20 client=3716573
+  Subruta #1 hub=UBBB qty=286 arrivalUTC=17:03
+    UBBB->OERK D20 depUTC=13:46 arrUTC=17:03 qty=286
+
+Pedido destino OPKC qty=347 releaseUTC=23:45 delivered=347 day=20 client=0853589
+  Subruta #1 hub=UBBB qty=247 arrivalUTC=06:16
+    UBBB->OPKC D20 depUTC=01:16 arrUTC=06:16 qty=247
+  Subruta #2 hub=UBBB qty=100 arrivalUTC=12:27
+    UBBB->OPKC D20 depUTC=07:27 arrUTC=12:27 qty=100
+
+Pedido destino SVMI qty=723 releaseUTC=05:08 delivered=723 day=20 client=7774060
+  Subruta #1 hub=SPIM qty=320 arrivalUTC=15:50
+    SPIM->SVMI D19 depUTC=10:24 arrUTC=15:50 qty=320
+  Subruta #2 hub=SPIM qty=320 arrivalUTC=22:41
+    SPIM->SVMI D19 depUTC=17:15 arrUTC=22:41 qty=320
+  Subruta #3 hub=UBBB qty=83 arrivalUTC=03:48
+    UBBB->SVMI D19 depUTC=11:27 arrUTC=03:48 qty=83
+
+Pedido destino UMMS qty=380 releaseUTC=20:30 delivered=380 day=20 client=7053604
+  Subruta #1 hub=SPIM qty=157 arrivalUTC=21:19
+    SPIM->UMMS D20 depUTC=04:08 arrUTC=21:19 qty=157
+  Subruta #2 hub=EBCI qty=223 arrivalUTC=17:21
+    EBCI->UMMS D20 depUTC=13:14 arrUTC=17:21 qty=223
+
+Pedido destino LOWW qty=562 releaseUTC=11:45 delivered=562 day=20 client=6878379
+  Subruta #1 hub=UBBB qty=300 arrivalUTC=00:00
+    UBBB->LOWW D19 depUTC=19:26 arrUTC=00:00 qty=300
+  Subruta #2 hub=UBBB qty=262 arrivalUTC=17:58
+    UBBB->LOWW D19 depUTC=12:24 arrUTC=17:58 qty=262
+
+Pedido destino VIDP qty=654 releaseUTC=12:52 delivered=654 day=20 client=1454768
+  Subruta #1 hub=UBBB qty=109 arrivalUTC=00:34
+    UBBB->VIDP D19 depUTC=19:03 arrUTC=00:34 qty=109
+  Subruta #2 hub=UBBB qty=320 arrivalUTC=17:20
+    UBBB->VIDP D20 depUTC=12:49 arrUTC=17:20 qty=320
+  Subruta #3 hub=UBBB qty=225 arrivalUTC=12:43
+    UBBB->VIDP D20 depUTC=07:12 arrUTC=12:43 qty=225
+
+Pedido destino LOWW qty=988 releaseUTC=11:52 delivered=988 day=20 client=5230890
+  Subruta #1 hub=UBBB qty=78 arrivalUTC=17:58
+    UBBB->LOWW D19 depUTC=12:24 arrUTC=17:58 qty=78
+  Subruta #2 hub=EBCI qty=360 arrivalUTC=02:04
+    EBCI->LOWW D20 depUTC=23:56 arrUTC=02:04 qty=360
+  Subruta #3 hub=UBBB qty=320 arrivalUTC=12:54
+    UBBB->LOWW D20 depUTC=07:20 arrUTC=12:54 qty=320
+  Subruta #4 hub=SPIM qty=230 arrivalUTC=18:12
+    SPIM->LKPR D19 depUTC=20:18 arrUTC=11:15 qty=230
+    LKPR->LOWW D20 depUTC=16:52 arrUTC=18:12 qty=230
+
+Pedido destino OERK qty=463 releaseUTC=11:45 delivered=463 day=20 client=7338244
+  Subruta #1 hub=UBBB qty=174 arrivalUTC=02:49
+    UBBB->OERK D20 depUTC=22:32 arrUTC=02:49 qty=174
+  Subruta #2 hub=SPIM qty=60 arrivalUTC=15:45
+    SPIM->OMDB D19 depUTC=04:35 arrUTC=00:10 qty=60
+    OMDB->OERK D20 depUTC=12:36 arrUTC=15:45 qty=60
+  Subruta #3 hub=SPIM qty=229 arrivalUTC=15:45
+    SPIM->OMDB D19 depUTC=15:57 arrUTC=11:32 qty=229
+    OMDB->OERK D20 depUTC=12:36 arrUTC=15:45 qty=229
+
+Pedido destino SCEL qty=746 releaseUTC=15:45 delivered=746 day=20 client=1056213
+  Subruta #1 hub=EBCI qty=165 arrivalUTC=17:51
+    EBCI->SCEL D20 depUTC=01:05 arrUTC=17:51 qty=165
+  Subruta #2 hub=SPIM qty=340 arrivalUTC=13:15
+    SPIM->SCEL D20 depUTC=08:11 arrUTC=13:15 qty=340
+  Subruta #3 hub=SPIM qty=241 arrivalUTC=05:38
+    SPIM->SCEL D20 depUTC=00:34 arrUTC=05:38 qty=241
+
+Pedido destino OMDB qty=569 releaseUTC=01:08 delivered=569 day=20 client=8863379
+  Subruta #1 hub=SPIM qty=360 arrivalUTC=00:10
+    SPIM->OMDB D18 depUTC=04:35 arrUTC=00:10 qty=360
+  Subruta #2 hub=UBBB qty=209 arrivalUTC=06:23
+    UBBB->OMDB D19 depUTC=02:13 arrUTC=06:23 qty=209
+
+Pedido destino OAKB qty=505 releaseUTC=18:45 delivered=505 day=20 client=7857867
+  Subruta #1 hub=SPIM qty=320 arrivalUTC=01:17
+    SPIM->OAKB D19 depUTC=04:25 arrUTC=01:17 qty=320
+  Subruta #2 hub=UBBB qty=185 arrivalUTC=11:53
+    UBBB->OAKB D20 depUTC=07:37 arrUTC=11:53 qty=185
+
+Pedido destino SABE qty=801 releaseUTC=01:25 delivered=801 day=20 client=4432677
+  Subruta #1 hub=SPIM qty=300 arrivalUTC=15:14
+    SPIM->SABE D19 depUTC=10:20 arrUTC=15:14 qty=300
+  Subruta #2 hub=SPIM qty=360 arrivalUTC=16:29
+    SPIM->SABE D19 depUTC=11:35 arrUTC=16:29 qty=360
+  Subruta #3 hub=EBCI qty=141 arrivalUTC=23:15
+    EBCI->SABE D19 depUTC=07:14 arrUTC=23:15 qty=141
+
+Pedido destino OPKC qty=93 releaseUTC=15:14 delivered=93 day=20 client=4975321
+  Subruta #1 hub=EBCI qty=93 arrivalUTC=01:58
+    EBCI->OPKC D19 depUTC=16:19 arrUTC=01:58 qty=93
+
+Pedido destino SCEL qty=454 releaseUTC=11:30 delivered=454 day=20 client=5750124
+  Subruta #1 hub=SPIM qty=19 arrivalUTC=18:03
+    SPIM->SCEL D19 depUTC=13:59 arrUTC=18:03 qty=19
+  Subruta #2 hub=SPIM qty=300 arrivalUTC=05:38
+    SPIM->SCEL D19 depUTC=00:34 arrUTC=05:38 qty=300
+  Subruta #3 hub=EBCI qty=135 arrivalUTC=17:51
+    EBCI->SCEL D20 depUTC=01:05 arrUTC=17:51 qty=135
+
+Pedido destino EKCH qty=738 releaseUTC=15:52 delivered=738 day=20 client=7961799
+  Subruta #1 hub=EBCI qty=191 arrivalUTC=20:53
+    EBCI->EKCH D19 depUTC=18:55 arrUTC=20:53 qty=191
+  Subruta #2 hub=EBCI qty=300 arrivalUTC=03:58
+    EBCI->EKCH D20 depUTC=01:00 arrUTC=03:58 qty=300
+  Subruta #3 hub=EBCI qty=247 arrivalUTC=10:45
+    EBCI->EKCH D20 depUTC=08:47 arrUTC=10:45 qty=247
+
+Pedido destino SUAA qty=87 releaseUTC=10:25 delivered=87 day=20 client=6359305
+  Subruta #1 hub=SPIM qty=87 arrivalUTC=18:13
+    SPIM->SUAA D19 depUTC=12:09 arrUTC=18:13 qty=87
+
+Pedido destino EKCH qty=375 releaseUTC=17:45 delivered=375 day=20 client=7332550
+  Subruta #1 hub=EBCI qty=93 arrivalUTC=10:45
+    EBCI->EKCH D20 depUTC=08:47 arrUTC=10:45 qty=93
+  Subruta #2 hub=EBCI qty=282 arrivalUTC=15:52
+    EBCI->EKCH D20 depUTC=13:54 arrUTC=15:52 qty=282
+
+Pedido destino UMMS qty=495 releaseUTC=15:30 delivered=495 day=20 client=4194973
+  Subruta #1 hub=SPIM qty=320 arrivalUTC=21:19
+    SPIM->UMMS D19 depUTC=04:08 arrUTC=21:19 qty=320
+  Subruta #2 hub=UBBB qty=175 arrivalUTC=20:11
+    UBBB->UMMS D19 depUTC=16:25 arrUTC=20:11 qty=175
+
+Pedido destino OERK qty=866 releaseUTC=11:30 delivered=866 day=20 client=7513254
+  Subruta #1 hub=UBBB qty=360 arrivalUTC=00:04
+    UBBB->OERK D19 depUTC=20:47 arrUTC=00:04 qty=360
+  Subruta #2 hub=UBBB qty=340 arrivalUTC=17:03
+    UBBB->OERK D19 depUTC=13:46 arrUTC=17:03 qty=340
+  Subruta #3 hub=UBBB qty=166 arrivalUTC=02:49
+    UBBB->OERK D20 depUTC=22:32 arrUTC=02:49 qty=166
+
+Pedido destino OYSN qty=918 releaseUTC=20:59 delivered=918 day=20 client=9025277
+  Subruta #1 hub=UBBB qty=320 arrivalUTC=03:59
+    UBBB->OYSN D20 depUTC=22:25 arrUTC=03:59 qty=320
+  Subruta #2 hub=UBBB qty=360 arrivalUTC=10:09
+    UBBB->OYSN D20 depUTC=05:35 arrUTC=10:09 qty=360
+  Subruta #3 hub=EBCI qty=238 arrivalUTC=14:17
+    EBCI->OYSN D20 depUTC=06:38 arrUTC=14:17 qty=238
+
+Pedido destino SABE qty=781 releaseUTC=18:59 delivered=781 day=20 client=8132946
+  Subruta #1 hub=SPIM qty=199 arrivalUTC=01:57
+    SPIM->SABE D19 depUTC=20:03 arrUTC=01:57 qty=199
+  Subruta #2 hub=SPIM qty=340 arrivalUTC=04:56
+    SPIM->SABE D19 depUTC=23:02 arrUTC=04:56 qty=340
+  Subruta #3 hub=SPIM qty=242 arrivalUTC=15:14
+    SPIM->SABE D20 depUTC=10:20 arrUTC=15:14 qty=242
+
+Pedido destino EDDI qty=987 releaseUTC=19:52 delivered=987 day=20 client=9255656
+  Subruta #1 hub=EBCI qty=11 arrivalUTC=04:31
+    EBCI->EDDI D20 depUTC=02:41 arrUTC=04:31 qty=11
+  Subruta #2 hub=EBCI qty=300 arrivalUTC=10:27
+    EBCI->EDDI D20 depUTC=08:37 arrUTC=10:27 qty=300
+  Subruta #3 hub=EBCI qty=360 arrivalUTC=21:11
+    EBCI->EDDI D20 depUTC=19:21 arrUTC=21:11 qty=360
+  Subruta #4 hub=SPIM qty=316 arrivalUTC=01:15
+    SPIM->EDDI D20 depUTC=10:21 arrUTC=01:15 qty=316
+
+Pedido destino SUAA qty=162 releaseUTC=17:01 delivered=162 day=20 client=7838147
+  Subruta #1 hub=SPIM qty=162 arrivalUTC=02:59
+    SPIM->SUAA D19 depUTC=20:55 arrUTC=02:59 qty=162
+
+Pedido destino VIDP qty=851 releaseUTC=09:45 delivered=851 day=20 client=3355701
+  Subruta #1 hub=UBBB qty=320 arrivalUTC=17:20
+    UBBB->VIDP D19 depUTC=12:49 arrUTC=17:20 qty=320
+  Subruta #2 hub=EBCI qty=320 arrivalUTC=02:52
+    EBCI->VIDP D19 depUTC=16:43 arrUTC=02:52 qty=320
+  Subruta #3 hub=UBBB qty=211 arrivalUTC=00:34
+    UBBB->VIDP D19 depUTC=19:03 arrUTC=00:34 qty=211
+
+Pedido destino OSDI qty=999 releaseUTC=01:14 delivered=999 day=20 client=9167501
+  Subruta #1 hub=UBBB qty=12 arrivalUTC=12:49
+    UBBB->OSDI D19 depUTC=09:58 arrUTC=12:49 qty=12
+  Subruta #2 hub=UBBB qty=360 arrivalUTC=17:34
+    UBBB->OSDI D19 depUTC=14:43 arrUTC=17:34 qty=360
+  Subruta #3 hub=SPIM qty=320 arrivalUTC=01:39
+    SPIM->OSDI D19 depUTC=07:28 arrUTC=01:39 qty=320
+  Subruta #4 hub=UBBB qty=307 arrivalUTC=12:49
+    UBBB->OSDI D20 depUTC=09:58 arrUTC=12:49 qty=307
+
+Pedido destino SGAS qty=189 releaseUTC=08:30 delivered=189 day=20 client=9884904
+  Subruta #1 hub=EBCI qty=189 arrivalUTC=05:46
+    EBCI->SGAS D19 depUTC=15:51 arrUTC=05:46 qty=189
+
+Pedido destino OYSN qty=139 releaseUTC=03:30 delivered=139 day=20 client=2393579
+  Subruta #1 hub=UBBB qty=139 arrivalUTC=10:09
+    UBBB->OYSN D19 depUTC=05:35 arrUTC=10:09 qty=139
+
+Pedido destino OMDB qty=499 releaseUTC=20:01 delivered=499 day=20 client=8206271
+  Subruta #1 hub=EBCI qty=360 arrivalUTC=07:20
+    EBCI->OMDB D20 depUTC=23:51 arrUTC=07:20 qty=360
+  Subruta #2 hub=UBBB qty=139 arrivalUTC=06:23
+    UBBB->OMDB D20 depUTC=02:13 arrUTC=06:23 qty=139
+
+Pedido destino UMMS qty=763 releaseUTC=16:25 delivered=763 day=20 client=9848807
+  Subruta #1 hub=UBBB qty=300 arrivalUTC=08:51
+    UBBB->UMMS D20 depUTC=04:05 arrUTC=08:51 qty=300
+  Subruta #2 hub=EBCI qty=300 arrivalUTC=07:58
+    EBCI->UMMS D20 depUTC=03:51 arrUTC=07:58 qty=300
+  Subruta #3 hub=SPIM qty=163 arrivalUTC=21:19
+    SPIM->UMMS D20 depUTC=04:08 arrUTC=21:19 qty=163
+
+Pedido destino LATI qty=355 releaseUTC=11:01 delivered=355 day=20 client=0417295
+  Subruta #1 hub=EBCI qty=355 arrivalUTC=19:34
+    EBCI->LATI D19 depUTC=16:39 arrUTC=19:34 qty=355
+
+Pedido destino OJAI qty=847 releaseUTC=22:08 delivered=847 day=20 client=9584226
+  Subruta #1 hub=EBCI qty=340 arrivalUTC=08:06
+    EBCI->OJAI D20 depUTC=02:55 arrUTC=08:06 qty=340
+  Subruta #2 hub=SPIM qty=360 arrivalUTC=20:22
+    SPIM->OJAI D19 depUTC=02:18 arrUTC=20:22 qty=360
+  Subruta #3 hub=EBCI qty=147 arrivalUTC=11:56
+    EBCI->OJAI D20 depUTC=05:45 arrUTC=11:56 qty=147
+
+Pedido destino LDZA qty=490 releaseUTC=09:14 delivered=490 day=20 client=0794507
+  Subruta #1 hub=EBCI qty=360 arrivalUTC=16:59
+    EBCI->LDZA D19 depUTC=13:40 arrUTC=16:59 qty=360
+  Subruta #2 hub=UBBB qty=130 arrivalUTC=20:36
+    UBBB->LDZA D19 depUTC=15:04 arrUTC=20:36 qty=130
+
+Pedido destino SKBO qty=151 releaseUTC=22:30 delivered=151 day=20 client=0733738
+  Subruta #1 hub=SPIM qty=151 arrivalUTC=03:25
+    SPIM->SKBO D19 depUTC=23:09 arrUTC=03:25 qty=151
+
+Pedido destino OSDI qty=204 releaseUTC=06:25 delivered=204 day=20 client=2776590
+  Subruta #1 hub=UBBB qty=53 arrivalUTC=12:49
+    UBBB->OSDI D20 depUTC=09:58 arrUTC=12:49 qty=53
+  Subruta #2 hub=UBBB qty=151 arrivalUTC=17:34
+    UBBB->OSDI D20 depUTC=14:43 arrUTC=17:34 qty=151
+
+Pedido destino LOWW qty=424 releaseUTC=15:01 delivered=424 day=20 client=2195582
+  Subruta #1 hub=SPIM qty=110 arrivalUTC=18:12
+    SPIM->LKPR D19 depUTC=20:18 arrUTC=11:15 qty=110
+    LKPR->LOWW D20 depUTC=16:52 arrUTC=18:12 qty=110
+  Subruta #2 hub=UBBB qty=314 arrivalUTC=17:58
+    UBBB->LOWW D20 depUTC=12:24 arrUTC=17:58 qty=314
+
+Pedido destino OSDI qty=776 releaseUTC=10:14 delivered=776 day=20 client=3306600
+  Subruta #1 hub=UBBB qty=209 arrivalUTC=17:34
+    UBBB->OSDI D20 depUTC=14:43 arrUTC=17:34 qty=209
+  Subruta #2 hub=UBBB qty=340 arrivalUTC=01:51
+    UBBB->OSDI D21 depUTC=22:00 arrUTC=01:51 qty=340
+  Subruta #3 hub=SPIM qty=227 arrivalUTC=01:39
+    SPIM->OSDI D20 depUTC=07:28 arrUTC=01:39 qty=227
+
+Pedido destino LATI qty=143 releaseUTC=09:25 delivered=143 day=20 client=4222679
+  Subruta #1 hub=EBCI qty=143 arrivalUTC=13:23
+    EBCI->LATI D19 depUTC=10:28 arrUTC=13:23 qty=143
+
+Pedido destino SBBR qty=343 releaseUTC=23:14 delivered=343 day=20 client=7622566
+  Subruta #1 hub=SPIM qty=300 arrivalUTC=11:53
+    SPIM->SBBR D20 depUTC=05:48 arrUTC=11:53 qty=300
+  Subruta #2 hub=EBCI qty=43 arrivalUTC=15:55
+    EBCI->SBBR D20 depUTC=02:53 arrUTC=15:55 qty=43
+
+Pedido destino SLLP qty=798 releaseUTC=18:25 delivered=798 day=20 client=8183883
+  Subruta #1 hub=SPIM qty=320 arrivalUTC=02:25
+    SPIM->SLLP D19 depUTC=23:05 arrUTC=02:25 qty=320
+  Subruta #2 hub=SPIM qty=300 arrivalUTC=00:29
+    SPIM->SLLP D19 depUTC=21:09 arrUTC=00:29 qty=300
+  Subruta #3 hub=SPIM qty=178 arrivalUTC=08:41
+    SPIM->SLLP D20 depUTC=05:21 arrUTC=08:41 qty=178
+
+Pedido destino OYSN qty=15 releaseUTC=04:08 delivered=15 day=20 client=8596898
+  Subruta #1 hub=UBBB qty=15 arrivalUTC=10:09
+    UBBB->OYSN D19 depUTC=05:35 arrUTC=10:09 qty=15
+
+Pedido destino SEQM qty=163 releaseUTC=01:30 delivered=163 day=20 client=7356807
+  Subruta #1 hub=SPIM qty=163 arrivalUTC=05:50
+    SPIM->SEQM D18 depUTC=02:09 arrUTC=05:50 qty=163
+
+Pedido destino LATI qty=949 releaseUTC=23:52 delivered=949 day=20 client=4272550
+  Subruta #1 hub=UBBB qty=300 arrivalUTC=05:06
+    UBBB->LATI D20 depUTC=00:49 arrUTC=05:06 qty=300
+  Subruta #2 hub=UBBB qty=300 arrivalUTC=11:01
+    UBBB->LATI D20 depUTC=06:44 arrUTC=11:01 qty=300
+  Subruta #3 hub=EBCI qty=349 arrivalUTC=19:34
+    EBCI->LATI D20 depUTC=16:39 arrUTC=19:34 qty=349
+

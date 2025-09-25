@@ -10,10 +10,12 @@
 import java.io.*;
 import java.nio.file.*;
 import java.nio.charset.*;
+import java.time.*;
+import java.time.format.*;
 import java.util.*;
 import java.util.regex.*;
 
-public class MoraPackGAMensual {
+public class MoraPackGAMensualNoBlock {
 
     // ===================== Parámetros de negocio =====================
     static final int MIN_TURN_MIN = 30;               // conexión mínima
@@ -48,6 +50,10 @@ public class MoraPackGAMensual {
 
     // Recorte opcional de branching
     static final int TOPK_CANDIDATES = 2000;
+
+    static final Path LOG_FILE = Paths.get("logs/morapack-ga.log");
+    static final DateTimeFormatter LOG_TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    static final Path REPORT_FILE = Paths.get("logs/morapack-routes.txt");
 
     private static final Pattern LATITUDE_DMS = Pattern.compile(
         "Latitude:\\s*([0-9]{1,3})[^0-9]+([0-9]{1,2})[^0-9]+([0-9]{1,2})[^0-9]*([NS])",
@@ -164,6 +170,19 @@ public class MoraPackGAMensual {
         return s;
     }
 
+    static void logInfo(String tag, String message) {
+        try {
+            Path parent = LOG_FILE.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            String line = String.format("%s [%s] %s%n",
+                    LocalDateTime.now().format(LOG_TS), tag, message);
+            Files.writeString(LOG_FILE, line, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            System.err.println("No se pudo escribir log: " + e.getMessage());
+        }
+    }
+
     static double dmsToDecimal(int deg, int min, int sec, char hemi){
         double val = deg + min / 60.0 + sec / 3600.0;
         char h = Character.toUpperCase(hemi);
@@ -177,6 +196,43 @@ public class MoraPackGAMensual {
         int s = Integer.parseInt(sec);
         char h = (hemi != null && !hemi.isEmpty()) ? hemi.charAt(0) : 'N';
         return dmsToDecimal(d, m, s, h);
+    }
+
+    static void writeRoutesReport(Solution sol, List<Order> orders, Path file){
+        if (sol == null) return;
+        try {
+            Path parent = file.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            try (BufferedWriter bw = Files.newBufferedWriter(file, StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                bw.write("Reporte de rutas MoraPack GA\n");
+                bw.write("Generado: " + LocalDateTime.now().format(LOG_TS) + "\n\n");
+                for (Order o : orders) {
+                    List<SubRoute> lst = sol.routes.get(o);
+                    int delivered = (lst==null)?0:lst.stream().mapToInt(s->s.qty).sum();
+                    bw.write(String.format("Pedido destino %s qty=%d releaseUTC=%s delivered=%d day=%d client=%s%n",
+                            o.dest, o.qty, mmToHHMM(o.releaseMinUTC), delivered, o.dayOfMonth,
+                            o.clientId==null?"":o.clientId));
+                    if (lst != null) {
+                        int idx = 1;
+                        for (SubRoute sr : lst) {
+                            bw.write(String.format("  Subruta #%d hub=%s qty=%d arrivalUTC=%s%n",
+                                    idx++, sr.originHub, sr.qty, mmToHHMM(sr.arrivalUTC)));
+                            for (FlightUse fu : sr.legs) {
+                                bw.write(String.format("    %s->%s D%d depUTC=%s arrUTC=%s qty=%d%n",
+                                        fu.flight.orig, fu.flight.dest, fu.dayIndex,
+                                        mmToHHMM(fu.depUTC), mmToHHMM(fu.arrUTC), fu.qtyAssigned));
+                            }
+                        }
+                    }
+                    bw.write("\n");
+                }
+            }
+            logInfo("REPORT", "Reporte escrito en " + file.toAbsolutePath());
+        } catch (IOException e) {
+            System.err.println("No se pudo escribir el reporte: " + e.getMessage());
+            logInfo("REPORT", "Error escribiendo reporte: " + e.getMessage());
+        }
     }
 
     // ===================== Lectura robusta de archivos ===============
@@ -200,6 +256,8 @@ public class MoraPackGAMensual {
 
     // airports: CODE, GMT (-12..14), CAP (100..10000), opcional lat lon
     static void loadAirports(Path file, World W) throws IOException {
+        logInfo("AIRPORT", "Iniciando carga desde " + file.toAbsolutePath());
+        int loaded = 0;
         for (String s: readAllLinesAuto(file)) {
             String line = s.trim();
             if (line.isEmpty()) continue;
@@ -234,15 +292,19 @@ public class MoraPackGAMensual {
                 if (lat==null) lat = 0.0; if (lon==null) lon = 0.0;
                 Airport airport = new Airport(code, gmt, cap, lat, lon);
                 W.airports.put(code, airport);
-                System.out.println("Loaded airport " + code + " GMT=" + gmt + " CAP=" + cap
-                                   + " LAT=" + lat + " LON=" + lon);
+                loaded++;
+                logInfo("AIRPORT", "Loaded " + code + " GMT=" + gmt + " CAP=" + cap
+                        + " LAT=" + lat + " LON=" + lon);
             }
         }
+        logInfo("AIRPORT", "Total cargados: " + loaded);
         for (String h: EXPORT_HUBS) if (W.airports.containsKey(h)) W.hubList.add(h);
     }
 
     // flights: ORIG-DEST-HH:MM-HH:MM-CAP
     static void loadFlights(Path file, World W) throws IOException {
+        logInfo("FLIGHT", "Iniciando carga desde " + file.toAbsolutePath());
+        int loaded = 0;
         for (String s: readAllLinesAuto(file)) {
             String line = s.trim();
             if (line.isEmpty()) continue;
@@ -256,8 +318,12 @@ public class MoraPackGAMensual {
             Flight f = new Flight(orig, dest, dep, arr, cap);
             W.flights.add(f);
             W.outByAirport.computeIfAbsent(orig, k->new ArrayList<>()).add(f);
+            loaded++;
+            logInfo("FLIGHT", String.format("Loaded %s->%s dep=%s arr=%s cap=%d",
+                    orig, dest, p[2].trim(), p[3].trim(), cap));
         }
         W.outByAirport.values().forEach(lst -> lst.sort(Comparator.comparingInt(fl->fl.depLocalMin)));
+        logInfo("FLIGHT", "Total cargados: " + loaded);
     }
 
     // ===================== GA: Cromosoma =============================
@@ -375,6 +441,30 @@ public class MoraPackGAMensual {
     // ===================== Selección de vuelos (score heurístico) ====
     static class FlightCandidate {
         int fi, dayIndex, depUTC, arrUTC;
+        int avail;
+    }
+
+    static class LegStep {
+        int flightIndex;
+        int dayIndex;
+        int depUTC;
+        int arrUTC;
+        String waitAirport;
+        int waitStartSlot;
+        int waitEndSlot;
+        boolean requiresStorage;
+    }
+
+    static int maxStorageFit(StockTracker stock, String airport, int slotStart, int slotEnd, int maxQty) {
+        if (maxQty <= 0) return 0;
+        if (slotStart >= slotEnd) return maxQty;
+        int lo = 0, hi = maxQty;
+        while (lo < hi) {
+            int mid = (lo + hi + 1) >>> 1;
+            if (stock.canFit(airport, slotStart, slotEnd, mid)) lo = mid;
+            else hi = mid - 1;
+        }
+        return lo;
     }
 
     static class SelectContext {
@@ -383,11 +473,11 @@ public class MoraPackGAMensual {
         Chromosome chrom;
         String destTarget;
         double wKey = 1.0, wEarly = 0.1, wGeo = 0.05; // pesos existentes
-        // NEW: pesos para “más directo”
+        // pesos para “más directo”
         double wDirect = 50.0;   // gran bonus si dest == target
         double wTwoHop = 5.0;    // bonus si hay vuelo directo desde next -> target
         Map<String,Double> distToDestByAp = Collections.emptyMap();
-        // NEW: aeropuertos con vuelo directo hacia el destino
+        // aeropuertos con vuelo directo hacia el destino
         Set<String> hasDirectToTarget = Collections.emptySet();
     }
 
@@ -413,7 +503,7 @@ public class MoraPackGAMensual {
             double progress = 0.0;
             if (db!=null && da!=null) progress = db - da;
 
-            // NEW: bonus por “más directo”
+            // bonus por “más directo”
             double directBonus = f.dest.equals(ctx.destTarget) ? ctx.wDirect : 0.0;
             double twoHopBonus = ctx.hasDirectToTarget.contains(f.dest) ? ctx.wTwoHop : 0.0;
 
@@ -496,10 +586,9 @@ public class MoraPackGAMensual {
                 int used = dc.capUsed[fi][d];
                 int avail = f.capacity - used;
                 if (avail <= 0) continue;
-                if (avail < neededQty) continue;
 
                 FlightCandidate fc = new FlightCandidate();
-                fc.fi = fi; fc.dayIndex = d; fc.depUTC = depUTC; fc.arrUTC = arrUTC;
+                fc.fi = fi; fc.dayIndex = d; fc.depUTC = depUTC; fc.arrUTC = arrUTC; fc.avail = avail;
                 dc.candBuf.add(fc);
             }
         }
@@ -542,12 +631,11 @@ public class MoraPackGAMensual {
 
     // Construye UNA subruta completa desde un hub hasta el destino
     static SubRoute buildSubrouteFromHub(DecodeContext dc, Order o, String hub, int dueLimit, int blockQty){
+        if (blockQty <= 0) return null;
+
         String current = hub;
         int tNow = o.releaseMinUTC;
-
-        SubRoute sr = new SubRoute();
-        sr.originHub = hub;
-        sr.qty = blockQty;
+        int requestQty = blockQty;
 
         SelectContext sctx = new SelectContext();
         sctx.W = dc.W; sctx.P = dc.P; sctx.chrom = dc.chrom; sctx.destTarget = o.dest;
@@ -556,15 +644,18 @@ public class MoraPackGAMensual {
 
         int expansions = 0, maxExp = 2000;
         boolean firstLeg = true;
-        // NEW: evitar revisitas
         Set<String> visited = new HashSet<>();
         visited.add(hub);
 
+        List<LegStep> plan = new ArrayList<>(8);
+        int pathCapacity = requestQty;
+        int lastArrivalUTC = -1;
+
         while (!current.equals(o.dest) && expansions++ < maxExp) {
-            int cc = enumerateCandidates(dc, current, tNow, dueLimit, sr.qty);
+            int neededQty = Math.max(1, pathCapacity);
+            int cc = enumerateCandidates(dc, current, tNow, dueLimit, neededQty);
             if (cc==0) return null;
 
-            // NEW: filtrar candidatos que ya fueron visitados (evita bucles)
             dc.candBuf.removeIf(c -> {
                 String next = dc.W.flights.get(c.fi).dest;
                 return visited.contains(next);
@@ -572,57 +663,114 @@ public class MoraPackGAMensual {
             if (dc.candBuf.isEmpty()) return null;
 
             FlightCandidate chosen = null;
-            for (;;) {
+            while (true) {
                 FlightCandidate best = selectByPriority(dc.candBuf, sctx);
                 if (best == null) return null;
+
+                Flight flight = dc.W.flights.get(best.fi);
+                int legAvail = best.avail;
+                if (legAvail <= 0) {
+                    dc.candBuf.remove(best);
+                    if (dc.candBuf.isEmpty()) return null;
+                    continue;
+                }
+
+                int proposedCapacity = Math.min(pathCapacity, legAvail);
+                if (proposedCapacity <= 0) {
+                    dc.candBuf.remove(best);
+                    if (dc.candBuf.isEmpty()) return null;
+                    continue;
+                }
+
+                String waitAirport = null;
+                int waitStartSlot = 0;
+                int waitEndSlot = 0;
+                boolean requiresStorage = false;
 
                 Airport apCur = dc.W.airports.get(current);
                 boolean curIsHub = (apCur!=null && apCur.isExporter);
                 if (!firstLeg && !curIsHub) {
-                    int s = slotOf(tNow, dc.numSlots);
-                    int e = slotOf(best.depUTC, dc.numSlots);
-                    if (!dc.stock.canFit(current, s, e, sr.qty)) {
-                        dc.candBuf.remove(best);
-                        if (dc.candBuf.isEmpty()) return null;
-                        continue;
+                    waitAirport = current;
+                    waitStartSlot = slotOf(tNow, dc.numSlots);
+                    waitEndSlot = slotOf(best.depUTC, dc.numSlots);
+                    if (waitStartSlot < waitEndSlot) {
+                        int fit = maxStorageFit(dc.stock, waitAirport, waitStartSlot, waitEndSlot, proposedCapacity);
+                        if (fit <= 0) {
+                            dc.candBuf.remove(best);
+                            if (dc.candBuf.isEmpty()) return null;
+                            continue;
+                        }
+                        proposedCapacity = Math.min(proposedCapacity, fit);
+                        requiresStorage = true;
                     }
-                    dc.stock.addInterval(current, s, e, sr.qty);
                 }
+
+                pathCapacity = proposedCapacity;
+
+                LegStep step = new LegStep();
+                step.flightIndex = best.fi;
+                step.dayIndex = best.dayIndex;
+                step.depUTC = best.depUTC;
+                step.arrUTC = best.arrUTC;
+                step.waitAirport = waitAirport;
+                step.waitStartSlot = waitStartSlot;
+                step.waitEndSlot = waitEndSlot;
+                step.requiresStorage = requiresStorage;
+                plan.add(step);
+
+                current = flight.dest;
+                tNow = best.arrUTC;
+                lastArrivalUTC = tNow;
+                firstLeg = false;
+                visited.add(current);
                 chosen = best;
                 break;
             }
 
-            Flight chF = dc.W.flights.get(chosen.fi);
-            int prev = dc.capUsed[chosen.fi][chosen.dayIndex];
-            dc.capUsed[chosen.fi][chosen.dayIndex] = prev + sr.qty;
-
-            String k = fkey(chF, chosen.dayIndex);
-            int usedMap = dc.capUsedMap.getOrDefault(k,0);
-            dc.capUsedMap.put(k, usedMap + sr.qty);
-
-            sr.legs.add(new FlightUse(chF, chosen.dayIndex, chosen.depUTC, chosen.arrUTC, sr.qty));
-
-            current = chF.dest;
-            tNow = chosen.arrUTC;
-            firstLeg = false;
-            visited.add(current);
-
-            if (current.equals(o.dest)) {
-                // Reservar mínima ventana [arr, arr+120] por subruta (se extenderá al completar el pedido)
-                int s = slotOf(tNow, dc.numSlots);
-                int e = slotOf(tNow + PICKUP_WINDOW_MIN, dc.numSlots);
-                if (!dc.stock.canFit(current, s, e, sr.qty)) {
-                    return null;
-                }
-                dc.stock.addInterval(current, s, e, sr.qty);
-                sr.arrivalUTC = tNow;
-                return sr;
-            }
+            if (chosen == null) return null;
         }
-        return null;
+
+        if (!current.equals(o.dest)) return null;
+        if (plan.isEmpty()) return null;
+        if (pathCapacity <= 0) return null;
+
+        int finalQty = Math.min(pathCapacity, requestQty);
+        if (finalQty <= 0) return null;
+
+        int destStartSlot = slotOf(lastArrivalUTC, dc.numSlots);
+        int destEndSlot = slotOf(lastArrivalUTC + PICKUP_WINDOW_MIN, dc.numSlots);
+        int destFit = maxStorageFit(dc.stock, o.dest, destStartSlot, destEndSlot, finalQty);
+        if (destFit <= 0) return null;
+        finalQty = Math.min(finalQty, destFit);
+        if (finalQty <= 0) return null;
+
+        SubRoute sr = new SubRoute();
+        sr.originHub = hub;
+        sr.qty = finalQty;
+        sr.arrivalUTC = lastArrivalUTC;
+
+        for (LegStep step : plan) {
+            Flight flight = dc.W.flights.get(step.flightIndex);
+            if (step.requiresStorage) {
+                dc.stock.addInterval(step.waitAirport, step.waitStartSlot, step.waitEndSlot, finalQty);
+            }
+
+            int used = dc.capUsed[step.flightIndex][step.dayIndex];
+            dc.capUsed[step.flightIndex][step.dayIndex] = used + finalQty;
+
+            String key = fkey(flight, step.dayIndex);
+            int usedMap = dc.capUsedMap.getOrDefault(key, 0);
+            dc.capUsedMap.put(key, usedMap + finalQty);
+
+            sr.legs.add(new FlightUse(flight, step.dayIndex, step.depUTC, step.arrUTC, finalQty));
+        }
+
+        dc.stock.addInterval(o.dest, destStartSlot, destEndSlot, finalQty);
+
+        return sr;
     }
 
-    // NEW: estructura para llevar las reservas de destino de un pedido y poder extenderlas
+    // estructura para llevar las reservas de destino de un pedido y poder extenderlas
     static class DestReservation {
         int startSlot;
         int endSlot;
@@ -660,41 +808,28 @@ public class MoraPackGAMensual {
             int remaining = o.qty;
             List<SubRoute> subroutes = new ArrayList<>(4);
 
-            // NEW: reservas de destino para poder extenderlas cuando cambie el “último arribo”
+            // reservas de destino para poder extenderlas cuando cambie el “último arribo”
             List<DestReservation> destHolds = new ArrayList<>();
             int lastArrival = -1;
 
             int guard=0, guardMax=500;
             while (remaining>0 && guard++<guardMax){
-                final int[] BLOCK_TRY = {256,128,64,32,16,8,4,2,1};
-
                 SubRoute bestSr = null;
                 int bestArr = Integer.MAX_VALUE;
+                int requestQty = remaining;
 
-                for (int bt : BLOCK_TRY) {
-                    int block = Math.min(remaining, bt);
-
-                    SubRoute candidateBest = null;
-                    int candidateBestArr = Integer.MAX_VALUE;
-
-                    for (String hub: hubs(W)) {
-                        int due = computeDueForHub(W, hub, o.dest, o.releaseMinUTC);
-                        SubRoute sr = buildSubrouteFromHub(dc, o, hub, due, block);
-                        if (sr != null && sr.arrivalUTC < candidateBestArr) {
-                            candidateBestArr = sr.arrivalUTC;
-                            candidateBest = sr;
-                        }
-                    }
-                    if (candidateBest != null) {
-                        bestSr = candidateBest;
-                        bestArr = candidateBestArr;
-                        break;
+                for (String hub: hubs(W)) {
+                    int due = computeDueForHub(W, hub, o.dest, o.releaseMinUTC);
+                    SubRoute sr = buildSubrouteFromHub(dc, o, hub, due, requestQty);
+                    if (sr != null && sr.qty > 0 && sr.arrivalUTC < bestArr) {
+                        bestArr = sr.arrivalUTC;
+                        bestSr = sr;
                     }
                 }
 
                 if (bestSr == null) break;
 
-                // NEW: registrar la reserva mínima que ya hizo buildSubroute...
+                // registrar la reserva mínima que ya hizo buildSubroute...
                 int start = slotOf(bestSr.arrivalUTC, dc.numSlots);
                 int end   = slotOf(bestSr.arrivalUTC + PICKUP_WINDOW_MIN, dc.numSlots);
                 destHolds.add(new DestReservation(start, end, bestSr.qty));
@@ -702,7 +837,7 @@ public class MoraPackGAMensual {
                 subroutes.add(bestSr);
                 remaining -= bestSr.qty;
 
-                // NEW: actualizar “último arribo” y EXTENDER todas las reservas de destino hasta (last+120)
+                // actualizar “último arribo” y EXTENDER todas las reservas de destino hasta (last+120)
                 if (bestSr.arrivalUTC > lastArrival) {
                     int newLast = bestSr.arrivalUTC;
                     int newEnd = slotOf(newLast + PICKUP_WINDOW_MIN, dc.numSlots);
@@ -829,6 +964,7 @@ public class MoraPackGAMensual {
     static List<Order> loadOrdersMonthly(Path file, World W) throws IOException {
         List<Order> L = new ArrayList<>();
         int lineNo = 0;
+        logInfo("ORDER", "Iniciando carga desde " + file.toAbsolutePath());
         for (String s: readAllLinesAuto(file)){
             lineNo++;
             String line = s.trim(); if (line.isEmpty()) continue;
@@ -858,10 +994,13 @@ public class MoraPackGAMensual {
                 int releaseMinUTC = (dd-1)*1440 + hh*60 + mm;
 
                 L.add(new Order(dest, qty, releaseMinUTC, dd, clientId));
+                logInfo("ORDER", String.format("Loaded day=%d %s qty=%d release=%02d:%02d client=%s",
+                        dd, dest, qty, hh, mm, clientId));
             } catch (Exception ignore) {
                 // ignora línea mal formada
             }
         }
+        logInfo("ORDER", "Total cargados: " + L.size());
         // IMPORTANTE: el horizonte debe cubrir los días usados.
         return L;
     }
@@ -882,7 +1021,7 @@ public class MoraPackGAMensual {
 
         // NOTA: horizonDays debe ser suficientemente grande para dd usados (ej. 7 días o 31).
         int horizonDays = 31; // 31 por ser un dataset de 1 mes
-        long seed = 10250917L;
+        long seed = 10260475L;
 
         Solution best = runGA(W, orders, horizonDays, seed);
 
@@ -890,26 +1029,17 @@ public class MoraPackGAMensual {
         System.out.println("On-time: " + best.servedOnTime + " | Late: " + best.servedLate +
                 " | CapViol: " + best.capViol + " | AvgSlack(min): " + best.avgSlack);
 
-        for (Order o: orders) {
-            List<SubRoute> lst = best.routes.get(o);
-            int delivered = (lst==null)?0:lst.stream().mapToInt(s->s.qty).sum();
-            System.out.println("\nPedido destino " + o.dest +
-                    " qty=" + o.qty + " releaseUTC=" + mmToHHMM(o.releaseMinUTC) +
-                    " delivered=" + delivered + " day=" + o.dayOfMonth +
-                    " client=" + (o.clientId==null?"":o.clientId));
+        int deliveredOrders = best.servedOnTime + best.servedLate;
+        double pctOnTime = deliveredOrders == 0 ? 0.0 : (best.servedOnTime * 100.0) / deliveredOrders;
+        logInfo("RESULT", String.format(
+                "Pedidos Entregados=%d OnTime=%d Late=%d PctOnTime=%.2f Fitness=%.4f",
+                deliveredOrders, best.servedOnTime, best.servedLate, pctOnTime, best.objective));
+        writeRoutesReport(best, orders, REPORT_FILE);
 
-            if (lst != null) {
-                int i=1;
-                for (SubRoute sr: lst) {
-                    System.out.println("  Subruta #" + (i++) + " hub=" + sr.originHub +
-                            " qty=" + sr.qty + " arrivalUTC=" + mmToHHMM(sr.arrivalUTC));
-                    for (FlightUse fu: sr.legs) {
-                        System.out.println("    " + fu.flight.orig + "->" + fu.flight.dest +
-                                " D" + fu.dayIndex + " depUTC=" + mmToHHMM(fu.depUTC) +
-                                " arrUTC=" + mmToHHMM(fu.arrUTC) + " qty=" + fu.qtyAssigned);
-                    }
-                }
-            }
-        }
+        int totalOrders = orders.size();
+        System.out.printf("Pedidos entregados: %d/%d (%.2f%% on-time)%n",
+                deliveredOrders, totalOrders,
+                deliveredOrders==0?0.0:pctOnTime);
+        System.out.println("Detalle de rutas exportado a: " + REPORT_FILE.toAbsolutePath());
     }
 }
