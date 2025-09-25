@@ -473,11 +473,11 @@ public class MoraPackGAMensualNoBlock {
         Chromosome chrom;
         String destTarget;
         double wKey = 1.0, wEarly = 0.1, wGeo = 0.05; // pesos existentes
-        // NEW: pesos para “más directo”
+        // pesos para “más directo”
         double wDirect = 50.0;   // gran bonus si dest == target
         double wTwoHop = 5.0;    // bonus si hay vuelo directo desde next -> target
         Map<String,Double> distToDestByAp = Collections.emptyMap();
-        // NEW: aeropuertos con vuelo directo hacia el destino
+        // aeropuertos con vuelo directo hacia el destino
         Set<String> hasDirectToTarget = Collections.emptySet();
     }
 
@@ -503,7 +503,7 @@ public class MoraPackGAMensualNoBlock {
             double progress = 0.0;
             if (db!=null && da!=null) progress = db - da;
 
-            // NEW: bonus por “más directo”
+            // bonus por “más directo”
             double directBonus = f.dest.equals(ctx.destTarget) ? ctx.wDirect : 0.0;
             double twoHopBonus = ctx.hasDirectToTarget.contains(f.dest) ? ctx.wTwoHop : 0.0;
 
@@ -770,7 +770,7 @@ public class MoraPackGAMensualNoBlock {
         return sr;
     }
 
-    // NEW: estructura para llevar las reservas de destino de un pedido y poder extenderlas
+    // estructura para llevar las reservas de destino de un pedido y poder extenderlas
     static class DestReservation {
         int startSlot;
         int endSlot;
@@ -808,7 +808,7 @@ public class MoraPackGAMensualNoBlock {
             int remaining = o.qty;
             List<SubRoute> subroutes = new ArrayList<>(4);
 
-            // NEW: reservas de destino para poder extenderlas cuando cambie el “último arribo”
+            // reservas de destino para poder extenderlas cuando cambie el “último arribo”
             List<DestReservation> destHolds = new ArrayList<>();
             int lastArrival = -1;
 
@@ -829,7 +829,7 @@ public class MoraPackGAMensualNoBlock {
 
                 if (bestSr == null) break;
 
-                // NEW: registrar la reserva mínima que ya hizo buildSubroute...
+                // registrar la reserva mínima que ya hizo buildSubroute...
                 int start = slotOf(bestSr.arrivalUTC, dc.numSlots);
                 int end   = slotOf(bestSr.arrivalUTC + PICKUP_WINDOW_MIN, dc.numSlots);
                 destHolds.add(new DestReservation(start, end, bestSr.qty));
@@ -837,7 +837,7 @@ public class MoraPackGAMensualNoBlock {
                 subroutes.add(bestSr);
                 remaining -= bestSr.qty;
 
-                // NEW: actualizar “último arribo” y EXTENDER todas las reservas de destino hasta (last+120)
+                // actualizar “último arribo” y EXTENDER todas las reservas de destino hasta (last+120)
                 if (bestSr.arrivalUTC > lastArrival) {
                     int newLast = bestSr.arrivalUTC;
                     int newEnd = slotOf(newLast + PICKUP_WINDOW_MIN, dc.numSlots);
