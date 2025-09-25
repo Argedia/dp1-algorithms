@@ -1021,7 +1021,7 @@ public class MoraPackGAMensualNoBlock {
 
         // NOTA: horizonDays debe ser suficientemente grande para dd usados (ej. 7 días o 31).
         int horizonDays = 31; // 31 por ser un dataset de 1 mes
-        long seed = 20250925L;
+        long seed = 10260475L;
 
         Solution best = runGA(W, orders, horizonDays, seed);
 
