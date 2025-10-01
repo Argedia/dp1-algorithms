@@ -8,6 +8,14 @@ import alg2.algoritmo.Preprocesamiento;
 import alg2.algoritmo.PedidoSplitter;
 import alg2.algoritmo.PedidoSplitter;
 import alg2.reporte.Reportes;
+import alg2.entrada.CargaAeropuertos;
+import alg2.entrada.CargaPedidos;
+import alg2.entrada.CargaVuelos;
+import alg2.entrada.CargarProductos;
+import alg2.model.Instancia;
+import alg2.model.Pedido;
+import alg2.model.Producto;
+import alg2.model.Vuelo;
 
 import java.nio.file.*; import java.time.*; import java.util.*;
 
@@ -40,20 +48,33 @@ public class MoraPackACOmain {
     Preprocesamiento.precomputarDistanciasPorSaltos(inst);
 
     java.util.List<Pedido> pedidosOriginales = CargaPedidos.cargar(archivoPedidos, inst, ancla, azar);
-    inst.pedidos = PedidoSplitter.dividirPedidosEnSubpedidos(pedidosOriginales, inst, 100000);
+    System.out.printf("Pedidos cargados: %d%n", pedidosOriginales.size());
+    java.util.List<Producto> TodosProductos = CargarProductos.cargarProductosdesdePedidos(pedidosOriginales);
+  // Asignar productos a la instancia
+      for (Producto prod : TodosProductos) {
+          System.out.println(prod.toString());
+        }
+      
+    
+  inst.productos = TodosProductos;
 
-    long t0 = System.currentTimeMillis();
-    Solucion heur = Planificador.construirSolucionHeuristica(inst);
+   // inst.pedidos = PedidoSplitter.dividirPedidosEnSubpedidos(pedidosOriginales, inst, 100000);
+
+     long t0 = System.currentTimeMillis();
+    //Solucion heur = Planificador.construirSolucionHeuristica(inst);
+    Solucion heur = Planificador.construirSolucionHeuristicaProducto(inst);
     System.out.printf("Heurística: a tiempo=%d tarde=%d fitness=%.2f%n",
       heur.subpedidosATiempo, heur.subpedidosTarde, heur.valorObjetivo);
 
-    Solucion mejor = Planificador.ejecutarACO(inst);
+    //Solucion mejor = Planificador.ejecutarACO(inst);
+    Solucion mejor = Planificador.ejecutarACOProducto(inst);
     long t1 = System.currentTimeMillis();
 
     System.out.printf("ACO: a tiempo=%d tarde=%d fitness=%.2f%n",
-      mejor.subpedidosATiempo, mejor.subpedidosTarde, mejor.valorObjetivo);
+    mejor.subpedidosATiempo, mejor.subpedidosTarde, mejor.valorObjetivo);
 
     long elapsedMs = (t1 - t0);
-    Reportes.mostrarPlanificacionPorPedido(inst, mejor,"com/twoalg/alg2/reporte_planificacion.txt");
+    //Reportes.mostrarPlanificacionPorPedido(inst, mejor,"com/twoalg/alg2/reporte_planificacion.txt");
+    Reportes.mostrarPlanificacionPorProducto(inst, mejor,"com/twoalg/alg2/reporte_planificacionProductos.txt");
   }
 }

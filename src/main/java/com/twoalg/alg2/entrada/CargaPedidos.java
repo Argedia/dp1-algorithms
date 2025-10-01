@@ -19,6 +19,8 @@ public class CargaPedidos {
     for (String ln : lineas) {
       String l = ln.trim();
       if (l.isEmpty() || l.startsWith("#")) continue;
+      
+
       Matcher m = pat.matcher(l);
       if (!m.matches()) continue;
 
@@ -28,9 +30,10 @@ public class CargaPedidos {
       String dest = m.group(4);
       int qty = Integer.parseInt(m.group(5));
 
-      if (dd<1||dd>24||hh<1||hh>23||mm<1||mm>59||qty<1||qty>999) continue;
+      if (dd<1||dd>24||hh<0||hh>23||mm<0||mm>59||qty<1||qty>999) continue;
 
       Aeropuerto aDest = inst.aeropuertos.get(dest);
+      
       if (aDest == null) continue;
 
       String origen = null;  
@@ -45,21 +48,19 @@ public class CargaPedidos {
 
       Pedido p = new Pedido();
       p.id = idAuto++; 
-      p.origen = origen; 
+      //p.origen = origen; 
       p.destino = dest; 
       p.cantidad = qty;
       p.liberacionUTC = liberacionUTC; 
       p.vencimientoUTC = venc;
 
-      Producto prod = new Producto();
+     /*  Producto prod = new Producto();
       prod.idProducto = "PRD-" + p.id;
       prod.idPedido = "PED-" + (p.idPedidoOriginal == -1 ? p.id : p.idPedidoOriginal);
       prod.fechaPedido = Date.from(Instant.ofEpochSecond(liberacionUTC*60L));
       prod.fechaLimite = Date.from(Instant.ofEpochSecond(venc*60L));
       prod.estado = EstadoEnvio.EN_CURSO;
-      prod.ciudadDestino = dest;
-      p.producto = prod;
-
+      prod.ciudadDestino = dest; */
       pedidos.add(p);
     }
     return pedidos;

@@ -7,6 +7,7 @@ public class Instancia {
   public java.util.List<Vuelo> vuelos = new ArrayList<>();
   public Map<String,java.util.List<Vuelo>> vuelosPorOrigen = new HashMap<>();
   public java.util.List<Pedido> pedidos = new ArrayList<>();
+  public java.util.List<Producto> productos = new ArrayList<>();
   public LocalDate fechaAncla;
   public int diasMes;
 
